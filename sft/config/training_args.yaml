@@ -1,0 +1,19 @@
+dataset: data/lmsys-chat-1m
+# model_name: Qwen/Qwen2-0.5B-Instruct
+model_name: /mnt/user/models/Qwen2.5-0.5B
+
+num_proc: 24
+
+max_length: 2048
+lora: False # using lora or sft
+
+learning_rate: 2e-5
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 8
+
+output_dir: output/Qwen2.5-0.5B-lmsyschat
+
+
+# prod setting
+test: false
+seed: 1029
