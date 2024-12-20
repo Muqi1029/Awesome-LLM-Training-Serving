@@ -1,6 +1,6 @@
 dataset: data/lmsys-chat-1m
-# model_name: Qwen/Qwen2-0.5B-Instruct
-model_name: /mnt/user/models/Qwen2.5-0.5B
+
+model_name: Qwen/Qwen2.5-0.5B
 
 num_proc: 24
 
