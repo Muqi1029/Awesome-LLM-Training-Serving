@@ -41,7 +41,7 @@ def preprocess_dataset(messages, tokenizer, config, INGORE_INDEX=-100):
                 message_end_idx - message_start_idx
             )
     if "max_length" in config:
-        data["input_ids"] = data["input_ids"][:config["max_length"]]
-        data["labels"] = data["labels"][:config["max_length"]]
-        data["attention_mask"] = data["attention_mask"][:config["max_length"]]
+        data["input_ids"] = data["input_ids"][: config["max_length"]]
+        data["labels"] = data["labels"][: config["max_length"]]
+        data["attention_mask"] = data["attention_mask"][: config["max_length"]]
     return data
