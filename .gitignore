@@ -167,3 +167,6 @@ output/
 logs
 
 wandb
+
+.hydra
+outputs/
