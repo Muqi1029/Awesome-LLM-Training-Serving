@@ -1,10 +1,8 @@
-from os import remove
-import torch
-from torch.utils.data import Dataset, DataLoader
-from datasets import load_dataset
-from transformers import DataCollatorForSeq2Seq
 from functools import partial
 
+from datasets import load_dataset
+from torch.utils.data import DataLoader, Dataset, Subset
+from transformers import DataCollatorForSeq2Seq
 
 prompt_template = """
 {question}
@@ -66,6 +64,23 @@ def apply_input_output_template(example):
     return {"conversation": convs}
 
 
+class LMSYS_CHAT_1M_Dataset(Dataset):
+    def __init__(self, config, tokenizer):
+        self.dataset = load_dataset("lmsys/lmsys-chat-1m", split="train")
+        self.dataset = self.dataset.map(
+            lambda x: preprocess_chat_dataset(x, tokenizer, config),
+            num_proc=config["num_proc"],
+            batched=True,
+            remove_columns=self.dataset.column_names,
+        )
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index):
+        return self.dataset[index]
+
+
 class SFTDataset(Dataset):
     def __init__(self, config, tokenizer):
         self.dataset = load_dataset(config["data_path"], split="train")
@@ -83,7 +98,7 @@ class SFTDataset(Dataset):
         )
         self.dataset = self.dataset.map(
             map_func,
-            num_proc=None if "num_proc" in config else config["num_proc"],
+            num_proc=config["num_proc"],
             remove_columns=self.dataset.column_names,
         )
 
@@ -95,12 +110,19 @@ class SFTDataset(Dataset):
 
 
 def get_dataloader(config, tokenizer):
-    ds = SFTDataset(config, tokenizer)
+    if config["dataset"] == "lmsys/lmsys-chat-1m":
+        ds = LMSYS_CHAT_1M_Dataset(config, tokenizer)
+        if config["test"]:
+            ds = Subset(ds, range(config["max_samples"]))
+    else:
+        ds = SFTDataset(config, tokenizer)
     data_collator = DataCollatorForSeq2Seq(tokenizer, model=None)
     dataloader = DataLoader(
         dataset=ds,
         batch_size=config["per_device_train_batch_size"],
-        shuffle=True,
+        shuffle=config["shuffle"],
         collate_fn=data_collator,
+        num_workers=config["num_proc"],
+        drop_last=config["drop_last"],
     )
     return dataloader

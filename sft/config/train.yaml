@@ -1,0 +1,36 @@
+seed: 42
+
+# model
+model_name: "Qwen/Qwen2.5-0.5B"
+
+# output
+output_dir: "output/Qwen2.5-0.5B"
+save_strategy: "steps"
+save_steps: 500
+
+# dataset
+num_proc: 8
+dataset: lmsys/lmsys-chat-1m
+shuffle: true
+drop_last: true
+max_length: 2048
+
+# optim
+learning_rate: 2e-5
+weight_decay: 0.01
+
+# training
+per_device_train_batch_size: 32
+gradient_accumulation_steps: 4
+gradient_checkpointing: false
+warmup_ratio: 0.03
+num_epochs: 3
+
+# logging
+with_tracking: false
+project_name: "sft"
+log_with: "wandb"
+
+# test
+test: true
+max_samples: 100
