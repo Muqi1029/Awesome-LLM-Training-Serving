@@ -5,10 +5,10 @@ import torch
 from omegaconf import DictConfig
 from torch import nn
 from torch.nn import functional as F
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from data.dummy_dataset import DummyDataset
-from tutorial.utils import get_dataloader
 
 
 def compute_time(func):
@@ -43,7 +43,7 @@ def main(config: DictConfig):
     ds = DummyDataset(
         num_examples=config.dataset.num_examples, weights=config.dataset.weight
     )
-    dl = get_dataloader(ds)
+    dl = DataLoader(ds, batch_size=config.training.batch_size)
 
     model = nn.Sequential(nn.Linear(len(config.dataset.weight), 1))
 
