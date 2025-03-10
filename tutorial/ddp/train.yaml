@@ -1,0 +1,13 @@
+dataset:
+  num_examples: 100000
+  weight:
+    - 1.2
+    - 2.4
+    - 1
+  gamma: 0.1
+
+training:
+  epochs: 2
+  optimizer: "adam"
+  batch_size: 32
+  lr: 0.01

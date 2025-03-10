@@ -8,7 +8,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from data.dummy_dataset import DummyDataset
+from tutorial.data.dummy_dataset import DummyDataset
 
 
 def compute_time(func):
