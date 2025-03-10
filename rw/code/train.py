@@ -1,10 +1,10 @@
-import sys
-
 import yaml
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
-sys.path.append("..")
 from torch.optim import AdamW
+from transformers import (
+    AutoModelForSequenceClassification,
+    AutoTokenizer,
+    Qwen2ForSequenceClassification,
+)
 
 from rw.code.loss import reward_model_loss
 from rw.code.prepare_data import get_dataloader
