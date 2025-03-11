@@ -170,3 +170,7 @@ wandb
 
 .hydra
 outputs/
+
+*.pt
+*.pth
+*.pkl
