@@ -33,8 +33,8 @@ def cleanup():
 
 
 @compute_time
-def train(model, epochs, optimizer, dl, device):
-    for epoch in tqdm(range(epochs)):
+def train(model, epochs, optimizer, dl, device, rank):
+    for epoch in tqdm(range(epochs), disable=rank != 0):
         epoch_loss = 0
         for inputs, targets in dl:
             optimizer.zero_grad()
@@ -71,11 +71,12 @@ def main(config: DictConfig):
     )
 
     model = nn.Sequential(nn.Linear(len(config.dataset.weight), 1)).to(rank)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.training.lr)
     model = DDP(model, device_ids=[rank])
-    optimizer = torch.optim.SGD(model.parameters(), lr=config.training.lr)
 
+    dist.barrier()
     model.train()
-    train(model, config.training.epochs, optimizer, dl, rank)
+    train(model, config.training.epochs, optimizer, dl, rank, rank=rank)
 
     # make sure all processes have finished training
     dist.barrier()

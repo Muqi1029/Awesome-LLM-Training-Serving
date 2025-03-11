@@ -54,7 +54,8 @@ class Trainer:
         self.save_every = self.config.save_every
         if self.config.snapshot_path is None:
             self.config.snapshot_path = "snapshot.pt"
-        self._load_snapshot()
+        if os.path.exists(self.config.snapshot_path):
+            self._load_snapshot()
 
         if self.config.use_amp:
             self.scaler = torch.amp.GradScaler()
