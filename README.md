@@ -7,8 +7,13 @@ The content progresses step-by-step:
 3. Comprehensive Tutorials: Concluding with simple, practical guides on leveraging cutting-edge open-source libraries, such as LLaMA-Factory and OpenRLHF, for complete LLM training workflows.
 
 # TODO List
-- [x] Supervised Fine-Tuning (SFT)
+- [ ] Basic Data Parallel Training
+- [ ] Basic Model Parallel Training
+- [ ] Basic Pipeline Parallel Training
+- [ ] Basic ZeRO Optimization
+- [ ] Basic Distributed Training
+- [ ] Basic Mixed Precision Training
+- [ ] Basic Gradient Accumulation
+- [ ] Supervised Fine-Tuning (SFT)
 - [ ] Reinforcement Learning with Human Feedback (RLHF)
 - [ ] Add additional sections (e.g., evaluation, deployment, etc.)
-
-
