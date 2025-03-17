@@ -3,29 +3,16 @@ import random
 from datetime import datetime
 from functools import partial
 
-import yaml
+import hydra
 from datasets import load_dataset
+from omegaconf import DictConfig
 from transformers import DataCollatorForSeq2Seq, Trainer, TrainingArguments
 
-from sft.code.utils import load_model_and_tokenizer, preprocess_dataset
-
-with open("config/training_args.yaml") as stream:
-    try:
-        config = yaml.safe_load(stream)
-        logging.info(config)
-    except yaml.YAMLError as exc:
-        logging.error(exc)
-
-model_name = config["model_name"].rsplit("/", 1)[-1]
-t = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-logging.basicConfig(
-    filename=f"logs/{model_name}_{t}.log",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(filename)s - %(funcName)s - %(message)s",
-)
+from sft.code.utils import load_model_and_tokenizer
 
 
-def train():
+@hydra.main(config_path="../config", config_name="training_args.yaml")
+def train(config: DictConfig):
     model, tokenizer = load_model_and_tokenizer(config["model_name"])
 
     ds = load_dataset(config["dataset"], split="train")

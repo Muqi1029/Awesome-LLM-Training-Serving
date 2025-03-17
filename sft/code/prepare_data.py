@@ -15,6 +15,17 @@ response_template = """
 {response}
 """
 
+alpaca_eval_prompt_template = """
+{question}
+"""
+
+alpaca_eval_response_template = """
+<thinking>\n\n
+{cot}\n\n
+<final_response>\n\n
+{response}
+"""
+
 
 def preprocess_chat_dataset(messages, tokenizer, config, INGORE_INDEX=-100):
     messages = messages["conversation"]
@@ -109,20 +120,83 @@ class SFTDataset(Dataset):
         return self.dataset[index]
 
 
+alpaca_eval_prompt_template = """
+### Instruction:
+{instruction}
+"""
+
+alpaca_eval_response_template = """
+### Response:
+{output}
+"""
+
+
+def map_alpaca_eval_dataset(example, tokenizer, config):
+    convs = [
+        {
+            "role": "user",
+            "content": alpaca_eval_prompt_template.format(
+                instruction=example["instruction"]
+            ),
+        },
+        {
+            "role": "assistant",
+            "content": alpaca_eval_response_template.format(output=example["output"]),
+        },
+    ]
+
+    output = tokenizer.apply_chat_template(convs, add_generation_prompt=True)
+
+    labels = output.copy()
+
+    user_message = tokenizer.apply_chat_template([convs[0]], add_generation_prompt=True)
+    user_message_len = len(user_message)
+
+    labels[:user_message_len] = [-100] * user_message_len
+
+    if len(output) > config["max_length"]:
+        output = output[: config["max_length"]]
+        labels = labels[: config["max_length"]]
+
+    return {"input_ids": output, "labels": labels}
+
+
+class AlpacaEvalDataset(Dataset):
+    def __init__(self, config, tokenizer):
+        self.dataset = load_dataset(config["data_path"], split="test")
+
+        # map input output template
+        self.dataset = self.dataset.map(
+            partial(map_alpaca_eval_dataset, tokenizer=tokenizer),
+            num_proc=config["num_proc"],
+            batched=False,
+            remove_columns=self.dataset.column_names,
+        )
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index):
+        return self.dataset[index]
+
+
 def get_dataloader(config, tokenizer):
     if config["dataset"] == "lmsys/lmsys-chat-1m":
         ds = LMSYS_CHAT_1M_Dataset(config, tokenizer)
-        if config["test"]:
-            ds = Subset(ds, range(config["max_samples"]))
+    elif config["dataset"] == "tatsu-lab/alpaca_eval":
+        ds = AlpacaEvalDataset(config, tokenizer)
     else:
         ds = SFTDataset(config, tokenizer)
-    data_collator = DataCollatorForSeq2Seq(tokenizer, model=None)
+
+    if config["test"]:
+        ds = Subset(ds, range(config["max_samples"]))
     dataloader = DataLoader(
         dataset=ds,
         batch_size=config["per_device_train_batch_size"],
         shuffle=config["shuffle"],
-        collate_fn=data_collator,
         num_workers=config["num_proc"],
         drop_last=config["drop_last"],
+        pin_memory=True,
     )
+
     return dataloader
