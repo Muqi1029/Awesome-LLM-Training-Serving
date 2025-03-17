@@ -8,16 +8,16 @@ from transformers import (
     TrainingArguments,
 )
 
-from sft.code.prepare_data import get_dataloader
+from sft.code.prepare_data import AlpacaEvalDataset
 from sft.code.utils import load_model_and_tokenizer
 
 
-@hydra.main(config_path="../config", config_name="qwen_alpaca.yaml")
+@hydra.main(version_base=None, config_path="../config", config_name="qwen_alpaca_trainer")
 def main(config: DictConfig):
     model, tokenizer = load_model_and_tokenizer(config)
-    dataloader = get_dataloader(config, tokenizer)
-    data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer)
+    dataset = AlpacaEvalDataset(config, tokenizer)
 
+    data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer)
     training_args = TrainingArguments(
         output_dir=config.output_dir,
         num_train_epochs=config.max_epochs,
@@ -26,16 +26,18 @@ def main(config: DictConfig):
         save_strategy="steps",
         save_steps=config.save_steps,
         save_total_limit=config.save_total_limit,
-        logging_dir=config.logging_dir,
-        report_to="wandb",
-        run_name=config.run_name,
         learning_rate=config.learning_rate,
+        bf16=True,
+        report_to="wandb",  # logs to wandb
+        run_name=config.run_name,
+        logging_dir=config.logging_dir,
+        logging_steps=config.logging_steps,
     )
     trainer = Trainer(
         model=model,
         args=training_args,
+        train_dataset=dataset,
         data_collator=data_collator,
-        train_dataset=dataloader,
     )
     trainer.train()
 

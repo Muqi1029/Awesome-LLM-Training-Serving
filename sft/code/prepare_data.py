@@ -163,11 +163,15 @@ def map_alpaca_eval_dataset(example, tokenizer, config):
 
 class AlpacaEvalDataset(Dataset):
     def __init__(self, config, tokenizer):
-        self.dataset = load_dataset(config["data_path"], split="test")
+        self.dataset = load_dataset(
+            "tatsu-lab/alpaca",
+            split="train",
+            trust_remote_code=True,
+        )
 
         # map input output template
         self.dataset = self.dataset.map(
-            partial(map_alpaca_eval_dataset, tokenizer=tokenizer),
+            partial(map_alpaca_eval_dataset, tokenizer=tokenizer, config=config),
             num_proc=config["num_proc"],
             batched=False,
             remove_columns=self.dataset.column_names,
@@ -183,13 +187,13 @@ class AlpacaEvalDataset(Dataset):
 def get_dataloader(config, tokenizer):
     if config["dataset"] == "lmsys/lmsys-chat-1m":
         ds = LMSYS_CHAT_1M_Dataset(config, tokenizer)
-    elif config["dataset"] == "tatsu-lab/alpaca_eval":
+    elif config["dataset"] == "tatsu-lab/alpaca":
         ds = AlpacaEvalDataset(config, tokenizer)
     else:
         ds = SFTDataset(config, tokenizer)
 
-    if config["test"]:
-        ds = Subset(ds, range(config["max_samples"]))
+    if hasattr(config, "max_samples") and config.max_samples is not None:
+        ds = Subset(ds, range(config.max_samples))
     dataloader = DataLoader(
         dataset=ds,
         batch_size=config["per_device_train_batch_size"],
@@ -197,6 +201,7 @@ def get_dataloader(config, tokenizer):
         num_workers=config["num_proc"],
         drop_last=config["drop_last"],
         pin_memory=True,
+        collate_fn=data_collator,
     )
 
     return dataloader

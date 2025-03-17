@@ -2,26 +2,27 @@
 model_name_or_path: Qwen/Qwen2.5-0.5B-Instruct
 
 # dataset
-dataset: tatsu-lab/alpaca_eval
+dataset: tatsu-lab/alpaca
 max_length: 1024
-max_samples: 100
-batch_size: 256
 data_loader_workers: 4
 drop_last: false
 shuffle: false
+num_proc: 4
+max_samples: 100
 
 # training
 grad_norm_clip: 1.0
-output_dir: /mnt/user/models/qwen_alpaca
+output_dir: output/qwen_alpaca
 per_device_train_batch_size: 4
 per_device_eval_batch_size: 4
 gradient_accumulation_steps: 16
 max_epochs: 3
-save_steps: 500
-save_total_limit: 3
+save_steps: 200
+save_total_limit: 2
 learning_rate: 2e-5
 logging_dir: logs/qwen_alpaca
 
 # logging
 run_name: qwen_alpaca
 wandb_project: qwen_alpaca
+logging_steps: 10
