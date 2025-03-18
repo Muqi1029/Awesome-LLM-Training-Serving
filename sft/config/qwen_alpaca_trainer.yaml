@@ -24,7 +24,6 @@ logging_dir: logs/qwen_7b_alpaca
 
 # deepspeed
 deepspeed: config/deepspeed/zero_stage3_offload_config.json
-local_rank: ${oc.env:LOCAL_RANK,0}
 
 # logging
 run_name: qwen_7b_alpaca
