@@ -1,3 +1,6 @@
+import sys
+from pprint import pprint
+
 import hydra
 from omegaconf import DictConfig
 from transformers import (
@@ -11,9 +14,15 @@ from transformers import (
 from sft.code.prepare_data import AlpacaEvalDataset
 from sft.code.utils import load_model_and_tokenizer
 
+pprint(sys.argv)
+sys.argv.pop()
 
-@hydra.main(version_base=None, config_path="../config", config_name="qwen_alpaca_trainer")
+
+@hydra.main(
+    version_base=None, config_path="../config", config_name="qwen_alpaca_trainer"
+)
 def main(config: DictConfig):
+    print(f"Training {config.model_name_or_path} with {config.dataset} dataset")
     model, tokenizer = load_model_and_tokenizer(config)
     dataset = AlpacaEvalDataset(config, tokenizer)
 
@@ -27,11 +36,11 @@ def main(config: DictConfig):
         save_steps=config.save_steps,
         save_total_limit=config.save_total_limit,
         learning_rate=config.learning_rate,
-        bf16=True,
         report_to="wandb",  # logs to wandb
         run_name=config.run_name,
         logging_dir=config.logging_dir,
         logging_steps=config.logging_steps,
+        deepspeed=config.deepspeed,
     )
     trainer = Trainer(
         model=model,
