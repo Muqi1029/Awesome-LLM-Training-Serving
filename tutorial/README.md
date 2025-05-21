@@ -5,7 +5,9 @@ This part introduces a tutorial for basic knowledge of LLM training.
 1. Distributed Training
 2. Parallel Techniques
     1. Model Parallelism
-    2. Expert Parallel
+        1. Tensor Parallelism
+        2. Pipeline Parallelism
+    2. Expert Parallelism
     3. Data Parallelism
 3. Framework Usgae
     1. Torch
@@ -17,5 +19,3 @@ This part introduces a tutorial for basic knowledge of LLM training.
     7. Ray
     8. veRL
 4. Examples
-
-## Model Parallelism
