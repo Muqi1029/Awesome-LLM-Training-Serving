@@ -11,8 +11,8 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
-
 from tutorial.accelerate.utils import save_checkpoint
+
 from tutorial.data.dummy_dataset import DummyDataset
 
 logging.basicConfig(
@@ -31,11 +31,9 @@ def main(config: DictConfig):
 
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     torch.cuda.set_device(local_rank)
-
     accelerator = Accelerator(
         log_with=config.log_with,
         project_dir=config.output_dir,
-        gradient_accumulation_steps=config.accumulate_gradient_steps,
     )
     # init trackers
     accelerator.init_trackers(config.output_dir + "_test", config=dict(config))
@@ -66,12 +64,11 @@ def main(config: DictConfig):
         num_batches = 0
 
         for inputs, targets in train_dl:
-            with accelerator.accumulate(model):
-                outputs = model(inputs)
-                loss = F.mse_loss(outputs.squeeze(), targets)
-                accelerator.backward(loss)
-                optimizer.step()
-                optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = F.mse_loss(outputs.squeeze(), targets)
+            accelerator.backward(loss)
+            optimizer.step()
+            optimizer.zero_grad()
 
             epoch_loss += loss.detach()
             num_batches += 1
