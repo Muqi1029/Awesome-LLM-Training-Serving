@@ -1,0 +1,3 @@
+[submodule "tutorial/operator/triton/Liger-Kernel"]
+	path = tutorial/operator/triton/Liger-Kernel
+	url = git@github.com:linkedin/Liger-Kernel.git
