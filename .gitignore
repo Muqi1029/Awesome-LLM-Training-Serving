@@ -174,3 +174,5 @@ outputs/
 *.pt
 *.pth
 *.pkl
+
+.vscode
