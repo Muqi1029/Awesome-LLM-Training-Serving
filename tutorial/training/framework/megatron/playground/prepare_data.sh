@@ -12,4 +12,3 @@ python $preprocess_data_py \
        --tokenizer-type BertWordPieceLowerCase \
        --workers 2 \
        --split-sentences
-
