@@ -19,4 +19,3 @@ Megatron-LM Training Framework
 | Name | Year | Description |
 | --- | --- | --- |
 | [FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness](https://arxiv.org/abs/2205.14135) | 2022 | Online Softmax |
-| [FlashAttention2: One Write, Two Reads](https://arxiv.org/abs/2405.11299) | 2024 | Online Softmax |
