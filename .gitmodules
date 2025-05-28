@@ -1,3 +1,6 @@
 [submodule "tutorial/operator/triton/Liger-Kernel"]
 	path = tutorial/operator/triton/Liger-Kernel
 	url = git@github.com:linkedin/Liger-Kernel.git
+[submodule "tutorial/training/framework/megatron/Megatron-LM"]
+	path = tutorial/training/framework/megatron/Megatron-LM
+	url = git@github.com:NVIDIA/Megatron-LM.git
