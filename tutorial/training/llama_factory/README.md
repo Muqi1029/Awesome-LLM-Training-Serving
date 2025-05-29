@@ -80,6 +80,7 @@ Assuming a sample in the dataset is like this:
         {"role": "assistant", "content": "model response in the first round (optional)"}
     ]
 }
+```
 
 You should set the `columns` field as follows:
 
