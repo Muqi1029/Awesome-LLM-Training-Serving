@@ -40,70 +40,70 @@ In this process of initating `memory pool` , SGLang provides 3 abstract managers
 ```python
 class ModelRunner:
   def __init__(self, model_config, ....):
-    
+
     # adjust `AttentionBackend`, `mem_fraction_static`
     model_specific_adjustment()
-    
-    # since SGLang adjusts the settings depending on Model Arch 
+
+    # since SGLang adjusts the settings depending on Model Arch
     # then update that info globally
     global_server_args_dict.update({...})
-    
+
     # build WORLD_GROUP, TP_GROUP, PP_GROUP for later communication
     # after init the distibuted settings, get the minimum GPU memory across the world
     min_per_gpu_memory = init_torch_distributed()
-    
+
     initialize(min_per_gpu_memory)
-  
+
   def initialize(min_per_gpu_memory):
-    
+
     # load sampler and model
     sampler = Sampler()
     load_model()
-    
+
     ######
     # Until now, Model Weights & Distributed Initialization occpuy some GPU memory
     # Note: but `min_per_gpu_memory` doesn't change
     ######
-    
+
     # Core in this blog!!!
     init_memory_pool(
-      min_per_gpu_memory, 
+      min_per_gpu_memory,
       server_args.max_running_requests, # these 2 args are set by users
       server_args.max_total_tokens)
-    
+
     # ...
     init_cublas()
     init_attention_backend()
     init_cuda_graphs()
-  
+
   def init_memory_pool(
-       total_gpu_memory, 
+       total_gpu_memory,
        max_num_reqs=None,
        max_total_tokens=None):
     # compute how many token's KV Cache can be saved in each GPU
     max_total_num_tokens = profile_max_num_token(total_gpu_memory)
-    
+
     # adjust max_num_requests
     if max_num_reqs is None:
       max_num_reqs = min(
-       max(max_total_num_tokens / model_config.context_len * 512, 2048), 
+       max(max_total_num_tokens / model_config.context_len * 512, 2048),
        4096
     )
-    
+
     # adjust max_total_tokens
     if max_total_tokens is None:
       if max_total_tokens > max_total_num_tokens: logger.warning...
       max_total_num_tokens = min(max_total_tokens, max_total_num_tokens)
-    
+
     # align page size
     max_total_num_tokens = (max_total_num_tokens // page_size) * page_size
-    
+
     # init req_to_token_pool
     req_to_token_pool = ReqToTokenPool(
            max_num_reqs + 1,
            model_config.context_len + 4,
            ...)
-           
+
     # init token_to_kv_pool
     token_to_kv_pool = MHATokenToKVPool(
            max_total_num_tokens,
@@ -113,21 +113,21 @@ class ModelRunner:
            head_dim,
            layer_num,
            ...)
-     
+
     # init token_to_kv_pool_allocator
     token_to_kv_pool_allocator = TokenToKVPoolAllocator(
         max_total_num_tokens,
         kv_cache_dtype,
         device,
         token_to_kv_pool)
-      
-    ...END !!!  
-  
+
+    ...END !!!
+
   def profile_max_num_token(total_gpu_memory):
     # get min_per_gpu_memory in the world
     # Note: model has been loaded before
     available_gpu_memory = get_available_gpu_memory(distributed=True)
-    
+
     # Compute how much gpu memory **a token's KV Cache** occupy
     # Note: In TP settings, each GPU only handles part of `attention head` when computing attention scores
     cell_size = (
@@ -137,16 +137,16 @@ class ModelRunner:
      * 2 # since K and V
      * element_size(kv_cache_dtype) # bytes for each element of KV Cache Type
     )
-    
+
     # This is the **role** of `mem_fraction_static` here
-    # Note: 
+    # Note:
     # - `total_gpu_memory` is after initializing the distributed environment, min_per_gpu_memory
-    # - `available_gpu_memory` is after initializing the distbuted environment and loading model, min_per_gpu_memory 
+    # - `available_gpu_memory` is after initializing the distbuted environment and loading model, min_per_gpu_memory
     # - `total_gpu_memory * (1 - mem_fraction_static)`: the other potential GPU memory usage (like `activation` in the forward pass)
     # - `rest_memory`: Free GPU Memory(after loading model) substracting the other GPU memory, the rest is for `KV Cache`
-    rest_memory = available_gpu_memory - total_gpu_memory * 
+    rest_memory = available_gpu_memory - total_gpu_memory *
        (1 - mem_fraction_static)
-       
+
     # convert rest_memory from GigeByte back to Byte metric
     # compute how many tokens' KV cache can be saved
     max_num_tokens = int(rest_memory * (1 << 30) // cell_size)
@@ -191,24 +191,24 @@ class ReqToTokenPool:
     req_to_token = torch.zeros(size, max_context_len, dtype=torch.int32)
     # record free slots
     free_slots = list(range(size))
-  
+
   def write(indices, values):
     req_to_token[indices] = values
-    
+
   def avaiable_size():
     return len(free_slots)
-    
+
   def alloc(need_size):
     if need_size > len(free_slots): return None
     # directly remove `need_size` slots
     select_index = free_slots[:need_size]
         free_slots = free_slots[need_size:]
         return select_index
-    
-    def free(free_index): 
+
+    def free(free_index):
       free_slots.extend(free_index)
-  
-  def clear(): 
+
+  def clear():
     free_flost = list(range(size)
 ```
 
@@ -236,7 +236,7 @@ class MHATokenToKVPool(KVCache):
     ############
     # Now, each GPU Memory is nearly exhausted
     ###########
-  
+
   def _create_buffers():
     k_buffer = [
                 torch.zeros(
@@ -256,19 +256,19 @@ class MHATokenToKVPool(KVCache):
             ]
      def _clear_buffers():
        del k_buffer, v_buffer
-   
+
    ################
    ## READ API
    ################
    def get_key_buffer(layer_id):
      return k_buffer[layer_id - start_layer]
-  
+
    def get_value_buffer(layer_id):
      return v_buffer[layer_id - start_layer]
-     
+
    def get_kv_buffer(layer_id):
         return get_key_buffer(layer_id), get_value_buffer(layer_id)
-    
+
     ############
     ## WRITE API
     ############
@@ -287,13 +287,13 @@ class TokenToKVPoolAllocator:
   def __init__(size [max_total_num_tokens], dtype, page_size device, kvcache [token_to_kvcache_pool]):
     page_size = 1
     clear()
-  
+
   def clear():
     free_slots = torch.arange(1, self.size + 1, dtype=torch.int64, device)
-  
+
   def available_size():
     return len(free_slots)
-  
+
   ##########################
   # ALLOCATE API
    #########################
@@ -302,7 +302,7 @@ class TokenToKVPoolAllocator:
         select_index = free_slots[:need_size]
         free_slots = free_slots[need_size:]
         return select_index
-    
+
     ###########################
     ## FREE API
     ###########################
@@ -330,38 +330,38 @@ So in the `scheduler.get_next_batch_to_run` where get `ScheduleBatch` , for diff
 ```python
 class ScheduleBatch:
     """Store all information of a batch on the scheduler."""
-  
+
   def prepare_for_extend():
     bs = len(reqs)
     req_pool_indices = alloc_req_slots(bs)
-    
+
     # fill_ids = origin_input_ids + output_ids
     # input_ids are those token_ids whose KV Cache needs computing
     input_ids = [r.fill_ids[len(r.prefix_indices): ] for r in reqs]
-    
+
     # this is the num tokens we need allocate slots to accommodate
     extend_num_tokens = sum(len(ids) for ids in input_ids)
-    
+
     seq_lens = [len(r.fill_ids) for r in reqs]
     prefix_lens = [len(r.prefix_indices) for r in reqs]
-    
+
     # extend_lens is actually equal to `seq_lens - prefix_lens`
     extend_lens = [r.extend_input_len for r in reqs]
-    
+
     for i, (req, seq_len, pre_len) in enumerate(reqs, seq_lens, pre_lens):
       req.req_pool_idx = req_pool_indices[i]
-      
+
       # here assert again
       assert seq_len - pre_len == req.extend_input_len
-      
+
       if pre_len > 0:
         # write cached `out_cache_loc` into `req_to_token_pool`
         req_to_token_pool.write(
                     (req.req_pool_idx, slice(0, pre_len)), req.prefix_indices
                 )
-        
+
        out_cache_loc = alloc_token_slots(extend_num_tokens)
-       
+
        pt = 0
        for i in range(bs):
          # write uncached `out_cache_loc` into `req_to_token_pool`
@@ -372,27 +372,27 @@ class ScheduleBatch:
                 )
                 pt += extend_lens[i]
        ... END !!!
-  
+
   def prepare_for_decode():
     bs = len(reqs)
-    
+
     # allocate `bs` tokens
     out_cache_loc = self.alloc_token_slots(bs)
-    
+
     # compute `req_to_token_pool` locs
     locs = seq_lens + 1
-    
-    # write 
+
+    # write
     req_to_token_pool.write(
             (req_pool_indices, locs), out_cache_loc.to(torch.int32)
         )
        ... END !!!
-  
+
   def alloc_req_slots(num_reqs):
     req_pool_indices = req_to_token_pool.alloc(num_reqs)
     if req_pool_indices is None: raise RuntimeError("")
     return req_pool_indices
-  
+
   def alloc_token_slots(num_tokens):
     out_cache_loc = self.token_to_kv_pool_allocator.alloc(num_tokens)
     if out_cache_loc is None: raise RuntimeError()
@@ -428,7 +428,7 @@ class FlashAttention(AttentionBackend):
     if k is not None:
       if v is not None:
         cache_loc = forward_batch.out_cache_loc
-        
+
         # !!! Save the KV Cache into token_to_kv_pool !!!
         forward_batch.token_to_kv_pool.set_kv_buffer(
                         layer, cache_loc, k, v, ...
@@ -442,7 +442,7 @@ class FlashAttention(AttentionBackend):
         max_seqlen_q = metadata.max_seq_len_q
         max_seqlen_k = metadata.max_seq_len_k
         cu_seqlens_k = metadata.cu_seqlens_k
-        
+
         # !!! Retrive the KV Cache from token_to_kv_pool !!!
         key_cache, value_cache = forward_batch.token_to_kv_pool.get_kv_buffer(
                 layer.layer_id
@@ -454,7 +454,7 @@ class FlashAttention(AttentionBackend):
         value_cache = value_cache.view(
                 -1, self.page_size, layer.tp_v_head_num, layer.head_dim
             )
-            
+
         result = flash_attn_with_kvcache(
           q=q.contiguous().view(-1, layer.tp_q_head_num, layer.head_dim),
           key_cache,
@@ -462,9 +462,9 @@ class FlashAttention(AttentionBackend):
           page_table,
           ...
        )
-        
+
        return o.view(-1, layer.tp_q_head_num * layer.v_head_dim)
-  
+
   def forward_decode(forward_batch):
     # ... nearly same to forward_extend ...
 ```
@@ -495,16 +495,16 @@ class TreeNode:
         self.parent = None
         self.key = None # Key is the `token_ids`
         self.value = None # Value is the `out_cache_loc`, which records the location of real KV Cache data
-        
+
         self.lock_ref = 0 # how many reqs reference this node
-        
+
         self.last_access_time = time.monotonic()
 
         self.hit_count = 0
-        
+
         # indicating the node is loading KV cache from host
         self.loading = False
-        
+
         # store the host indices of KV cache
         self.host_value = None
 
@@ -516,16 +516,16 @@ class TreeNode:
 class RadixTree(BasePrefixCache):
   def __init__(req_to_token_pool, token_to_kv_pool_allocator, page_size, ...):
     if page_size == 1:
-      # key_match_fn: given 2 keys, return how many prefix ids that two keys has 
-            key_match_fn = _key_match_page_size1 
-            
+      # key_match_fn: given 2 keys, return how many prefix ids that two keys has
+            key_match_fn = _key_match_page_size1
+
             # get_child_key_fn: get 1-page-size key
             get_child_key_fn = lambda key: key[0]
         else:
             key_match_fn = partial(_key_match_paged, page_size=page_size)
             get_child_key_fn = lambda key: tuple(key[:page_size])
     reset()
-    
+
   def reset(self):
         self.root_node = TreeNode()
         self.root_node.key = []
@@ -545,11 +545,11 @@ class RadixTree(BasePrefixCache):
    def match_prefix(key: List[int]):
      page_aligned_len = len(key) // page_size * page_size
        key = key[:page_aligned_len]
-       
+
        value, last_node = _match_prefix_helper(root_node, key)
        if value: value = torch.cat(value)
        else: value = torch.empty((0,), dtype=torch.int64, device=device)
-       
+
        # 1. prefix `out_cache_loc` in the radix tree
        # 2. last_node
       return value, last_node
@@ -557,43 +557,43 @@ class RadixTree(BasePrefixCache):
   def _match_prefix_helper(node, key):
     # update time
     node.last_access_time = time.monotonic()
-    
+
     # get child key first
     child_key = self.get_child_key_fn(key)
-    
+
     value = []
     while len(key) > 0 and child_key in node.children.keys():
-    
+
       child = node.children[child_key]
-      
+
       # update time
       child.last_access_time = time.monotonic()
-      
+
       # get how many number of prefix ids (n * page_size)
       prefix_len = self.key_match_fn(child.key, key)
-      
+
       if prefix_len < len(child.key):
         # not a full match, split a full match, but shorter new_node
-        
+
         # NOTE: prefix_len is at least 1-page-size since `child_key in node.children.keys()`
         new_node = self._split_node(child.key, child, prefix_len)
-        
+
         # append the matched value
         value.append(new_node.value)
                node = new_node
                break
       else:
         # full match, try to get next child
-        
+
         # save the value
         value.append(child.value)
-        
+
         # update the node
                node = child
-               
+
                # truncate the prefix matched keys
                key = key[prefix_len:]
-               
+
                if len(key):
                  child_key = self.get_child_key_fn(key)
        return value, node
@@ -609,38 +609,38 @@ class RadixTree(BasePrefixCache):
     # here, key is actually child's key
     # key and value will be split into two parts
     # key and value: [......................... | ..........................]
-    #                                       prefix_len      
+    #                                       prefix_len
     #                  left: a new node's kv        right: truncated child
     # after this split process, `child(node)` will be
     # `parent <-> child`    =>
     # `parent <-> new_node <-> truncated child`
-    
+
     # create a new node
     new_node = TreeNode()
-    
+
     # make `new_node ---truncated child's 1-page-size key---> child`
     new_node.children = {self.get_child_key_fn(key[split_len:]): child}
-       
+
        # make `parent -> new_node`
        new_node.parent = child.parent
-       
+
        # make new_node get the same ref count
        new_node.lock_ref = child.lock_ref
-       
+
        # get left side kv, and set them to new_node
        new_node.key = child.key[:split_len]
        new_node.value = child.value[:split_len]
-    
+
     # make `new_node <- child`
        child.parent = new_node
-       
+
        # make `child` become `truncated child`: truncate the split_len key and value
        child.key = child.key[split_len:]
        child.value = child.value[split_len:]
-       
-       # make `parent ----new_node's 1-page-size key---> new_node 
+
+       # make `parent ----new_node's 1-page-size key---> new_node
        new_node.parent.children[self.get_child_key_fn(key)] = new_node
- 
+
     return new_node
 ```
 
@@ -652,53 +652,53 @@ class RadixTree(BasePrefixCache):
  ################
  def insert(self, key: List, value=None):
      if self.disable: return 0
-     
+
      if value is None: value = [x for x in key]
-     
+
      return _insert_helper(root_node, key, value)
 
   def _insert_helper(node, key, value):
     # update node's time for LRU eviction
     node.last_access_time = time.monotonic()
-    
+
       if len(key) == 0: return 0
-      
+
       # get 1-page-size key used for searching prefix
       child_key = get_child_key_fn(key)
-      
+
       total_prefix_length = 0
-      
+
       while len(key) > 0 and child_key in node.children.keys():
       # get next node
       node = node.children[child_key]
       # update next node's time
       node.last_access_time = time.monotonic()
-      
+
       # get prefix_len of next node and query key
       prefix_len = self.key_match_fn(node.key, key)
-      
+
       total_prefix_length += prefix_len
-      
+
       # update key and value
       key = key[prefix_len:]
           value = value[prefix_len:]
-          
+
           if prefix_len < len(node.key):
             # not a full match, split the node
             new_node = _split_node(node.key, node, prefix_len)
-             
+
               node = new_node
-          
+
           if len(key):
             # there are still some keys hasn't been matched, try to continue to find next node
             child_key = get_child_key_fn(key)
-            
+
             # NOTE: if prefix_len < len(node.key)
             # then it is impossible to continue this while loop
             # because the splitted new node only have one child, which is the unmatched node
             # so this new `child_key` doesn't exist `node.children.keys()`
             # this while loop continues only if a full match, but the query key still has a remaining part
-   
+
    if len(key):
      # if there exists still a remaining key that doesn't match in this radix tree,
      # create a new node
@@ -707,14 +707,14 @@ class RadixTree(BasePrefixCache):
           new_node.parent = node
           new_node.key = key
           new_node.value = value
-          
+
           # make node` point to this `new_node`
           node.children[child_key] = new_node
-          
+
           # this is evictable since it is a leaf node
           evictable_size_ += len(value)
-          
-   return total_prefix_length  
+
+   return total_prefix_length
 ```
 
 ### Lock Ref
@@ -727,7 +727,7 @@ class RadixTree(BasePrefixCache):
   def dec_lock_ref(node):
    if disable: return 0 # if disable radix tree
    delta = 0
-   
+
    # bottom to up
    while node != root_node:
      if node.lock_ref == 1:
@@ -738,11 +738,11 @@ class RadixTree(BasePrefixCache):
          lock_ref -= 1
          node = node.parent
     return delta
-    
+
  def inc_lock_ref(node):
    if disable: return 0
    delta = 0
-   
+
    # bottom to up
    while node != root_node:
      if node.lock_ref == 0:
@@ -750,7 +750,7 @@ class RadixTree(BasePrefixCache):
        evictable_size_ -= len(node.value)
              self.protected_size_ += len(node.value)
              delta -= len(node.value)
-     node.lock_ref += 1 
+     node.lock_ref += 1
    return delta
 ```
 
@@ -765,12 +765,12 @@ class RadixTree(BasePrefixCache):
   #######################
   def cache_unfinished_req(req):
     token_ids = req.fill_ids
-    
+
     # get `out_cache_loc`, which is actually Value
     kv_indices = req_to_token_pool.req_to_token[
             req.req_pool_idx, : len(token_ids)
       ]
-      
+
       if page_size != 1:
         page_aligned_len = len(kv_indices) // page_size * page_size
         # V align
@@ -778,89 +778,89 @@ class RadixTree(BasePrefixCache):
       else:
           page_aligned_len = len(kv_indices)
           page_aligned_kv_indices = kv_indices.clone()
-      
+
       # K align
       page_aligned_token_ids = token_ids[:page_aligned_len]
 
       # insert K,V
       new_prefix_len = insert(page_aligned_token_ids, page_aligned_kv_indices)
-      
+
       # remove repetive part
       token_to_kv_pool_allocator.free(
             kv_indices[len(req.prefix_indices) : new_prefix_len]
       )
-      
+
       #  get prefixed `out_cache_loc` and `new_last_node`
       new_indices, new_last_node = self.match_prefix(page_aligned_token_ids)
-      
+
       # only write new `out_cache_loc`
       req_to_token_pool.write(
             (req.req_pool_idx, slice(len(req.prefix_indices), len(new_indices))),
             new_indices[len(req.prefix_indices) :],
       )
-      
+
       # root -> ... -> last_node -> ... -> new_last_node
       # |-- lock_ref - 1 --|
       dec_lock_ref(req.last_node)
-      
+
       # root -> ... -> last_node -> ... -> new_last_node
-      # |------------- lock_ref + 1 -----------------|   
+      # |------------- lock_ref + 1 -----------------|
       inc_lock_ref(new_last_node)
 
- 
+
  #####################
  # Cache Finished Req
  #####################
   def cache_finished_req(req):
    if self.disable:
      # if disable radix tree, free the KV Cache of this finished req directly
-     
+
      # get `out_cache_loc`
      kv_indices = req_to_token_pool.req_to_token[
               req.req_pool_idx, : len(req.origin_input_ids) + len(req.output_ids) - 1
           ]
-          
+
           # free `req slots` and `token_to_kv_pool slots`
           token_to_kv_pool_allocator.free(kv_indices)
           req_to_token_pool.free(req.req_pool_idx)
           return
-          
+
      # if using radix tree, don't free KV Cache instantly for reusing opportunities
-     
+
      # get token_ids, which is actually key
      token_ids = (req.origin_input_ids + req.output_ids)[:-1]
-     
+
      # get `out_cache_loc`, which is actually value
      kv_indices = req_to_token_pool.req_to_token[
         req.req_pool_idx, : len(token_ids)
     ]
-    
+
     # assuming page size is 1, so it is automatically aligned
     page_aligned_len = len(kv_indices)
      page_aligned_kv_indices = kv_indices.clone()
-    
+
     # insert the [token_ids, out_cache_loc] into radix tree for reuse
     new_prefix_len = insert(
          token_ids[:page_aligned_len], page_aligned_kv_indices
     )
-    
+
      # only free [len(prefix_indices): new_prefix_len] part of kv pool, why?
      # since these part of `out_cache_loc` are REPETITIVE (REDUNDANT)!
-     
+
      # The whole process is as follows:
      # `req.prefix_indices` is computed when it is scheduled at first
      # `new_prefix_len` is the prefix lens when it is finished
-     # [len(req.prefix_indices): new_prefix_len] is the repetive part during which computed 
+     # [len(req.prefix_indices): new_prefix_len] is the repetive part during which computed
     token_to_kv_pool_allocator.free(
           kv_indices[len(req.prefix_indices) : new_prefix_len]
      )
-     
-     # free `req slot` for sure 
+
+     # free `req slot` for sure
      # since the req has been finished, its req_pool_idx can be used for other reqs
      req_to_token_pool.free(req.req_pool_idx)
-     
+
      # dec lock_ref of those node owns out_cache_loc[:len(prefix_indices)]
-     # these part will be possibly evictable 
+     # these part will be possibly evictable
      # but Note: these `out_cache_loc` have not been evicted yet
      dec_lock_ref(req.last_node)
 ```
@@ -868,41 +868,41 @@ class RadixTree(BasePrefixCache):
 ```python
   def evict(num_tokens: int):
     if disable: return
-    
+
     leaves = _collect_leaves()
-    
+
     # sort by `last_access_time` (LRU)
     heapq.heapify(leaves)
-    
+
     num_evicted = 0
     while num_evicted < num_tokens and len(leaves):
       x = heapq.heappop(leaves)
       if x == self.root_node: break
-      
+
       # if some reqs are pointing to this node, skip it
             if x.lock_ref > 0: continue
-             
+
             # free this node's `out_cache_loc`
             token_to_kv_pool_allocator.free(x.value)
-            
+
             num_evicted += len(x.value)
             _delete_leaf(x)
-            
+
             # add new leaves node for next evitable
             if len(x.parent.children) == 0:
                 heapq.heappush(leaves, x.parent)
-            
+
   def _delete_leaf(node):
-  
+
     # delete this node from its parent
     for k, v in node.parent.children.items():
             if v == node:
                 break
         del node.parent.children[k]
-        
+
         # update evicatble_size
         evictable_size_ -= len(node.key)
-    
+
 ```
 
 ## Usage
@@ -918,10 +918,10 @@ def process_batch_result_prefill(batch, result):
   for i, (req, next_token_id) in enumerate(batch.reqs, result.next_token_ids):
     req.output_ids.append(next_token_id)
         req.check_finished()
-        
+
         if req.finished():
           tree_cache.cache_finished_req(req)
-         
+
        elif not batch.decoding_reqs or req not in batch.decoding_reqs:
             # This updates radix so others can match
             tree_cache.cache_unfinished_req(req)
@@ -933,7 +933,7 @@ When `decode`  is over,
 def process_batch_result_decode(batch, result):
   for i, (req, next_token_id) in enumerate(zip(batch.reqs, next_token_ids)):
     req.check_finished()
-    
+
     if req.finished():
            tree_cache.cache_finished_req(req)
 ```
@@ -954,7 +954,7 @@ def alloc_token_slots(num_tokens: int, backup_state: bool = False):
     if token_to_kv_pool_allocator.available_size() < num_tokens:
       if tree_cache is not None:
           tree_cache.evict(num_tokens)
-          
+
   out_cache_loc = token_to_kv_pool_allocator.alloc(num_tokens)
 ```
 
