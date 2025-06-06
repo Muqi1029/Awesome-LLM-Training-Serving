@@ -1,68 +1,63 @@
-# Memory & Radix Cache
-[中文](./README_zh.md)
+# 内存分配与缓存管理
 
-Main walker:
+[Orginal Version(English)](./README.md)
 
+执行流程：
 `launch_server` ⇒ `_launch_subprocesses` ⇒ `Init Scheduler` ⇒ `Init TpWorker` ⇒ `Init ModelConfig & ModelRunner` ⇒ `ModelRunner init KV Cache Pool & Allcator`
 
-Main points in this blog:
+主要包含以下要点：
 
-- How `mem-fraction-static` works in the KV Cache Initiation
-- How is each token’s `KV Cache` computed
-- How `KV Cache Pool` are managed(allocate, free, use)
-- How `Radix Cache` reuses KV Cache
+1. `KV Cache`初始化中`mem-fraction-static`的工作原理
+2. 每个token的KV缓存如何计算
+3. KV缓存池的管理机制（分配、释放、使用）
+4. Radix Tree是如何管理和复用`KV Cache`
 
-This blog mainly compasses 2 sections
+有以下两个章节
+​​- `KV Cache`管理​​：探讨如何通过分配、释放和使用来管理`KV Cache`
+​- ​`Radix Tree Cache`​​：探讨基数树数据结构如何实现KV缓存复用
 
-- In the KV Cache Management section, we will explore how `KV Cache` is managed through allocation, freeing, and usage
-- In the Radix Tree Cache section, we will explore how the `radix tree` data structure enables KV Cache reuse
-
-# KV Cache Management
-
-> **Background**
-The `ModelRunner`: owns the real model, runs the **forward** pass of the models
+## `KV Cache`管理
 >
+> ​​背景知识​​
+ModelRunner：持有实际模型，负责执行模型的​​前向传播​
 
-here is the initialization of `ModelRunner` , and also the initialization of `KV Cache Pool`
+以下是ModelRunner的初始化过程，同时也是KV缓存池的初始化过程
 
-In this process of initating `memory pool` , SGLang provides 3 abstract managers
+在初始化内存池时，SGLang提供了三个抽象管理器：
 
-1. `req_to_token_pool`: A memory pool that maps a request’s tokens to `out_cache_loc`
-2. `token_to_kv_pool`: A pool that maps `out_cache_loc` from `req_token_pool` to its real KV Cache data
-3. `token_to_kv_pool_allocator`: Allocate and free real KV Cache data
+req_to_token_pool：将请求的token映射到out_cache_loc的内存池
+token_to_kv_pool：将req_token_pool中的out_cache_loc映射到实际KV缓存数据
+token_to_kv_pool_allocator：分配和释放实际KV缓存数据
 
 ```python
 class ModelRunner:
   def __init__(self, model_config, ....):
-
-    # adjust `AttentionBackend`, `mem_fraction_static`
+    # 调整`AttentionBackend`和`mem_fraction_static`
     model_specific_adjustment()
 
-    # since SGLang adjusts the settings depending on Model Arch
-    # then update that info globally
+    # 由于SGLang会根据模型架构调整设置，因此需要全局更新这些信息
     global_server_args_dict.update({...})
 
-    # build WORLD_GROUP, TP_GROUP, PP_GROUP for later communication
-    # after init the distibuted settings, get the minimum GPU memory across the world
+    # 为后续通信构建WORLD_GROUP、TP_GROUP、PP_GROUP
+    # 初始化分布式设置后，获取全局最小的GPU内存
     min_per_gpu_memory = init_torch_distributed()
 
     initialize(min_per_gpu_memory)
 
   def initialize(min_per_gpu_memory):
-
-    # load sampler and model
+    # 加载采样器和模型
     sampler = Sampler()
     load_model()
 
     ######
-    # Until now, Model Weights & Distributed Initialization occpuy some GPU memory
-    # Note: but `min_per_gpu_memory` doesn't change
+    # 至此，模型权重和分布式初始化已占用部分GPU内存
+    # 注意：但`min_per_gpu_memory`不会变化
     ######
 
-    # Core in this blog!!!
+    # 本文核心!!!
     init_memory_pool(
       min_per_gpu_memory,
-      server_args.max_running_requests, # these 2 args are set by users
+      server_args.max_running_requests,  # 这两个参数由用户设置
       server_args.max_total_tokens)
 
     # ...
@@ -74,31 +69,31 @@ class ModelRunner:
        total_gpu_memory,
        max_num_reqs=None,
        max_total_tokens=None):
-    # compute how many token's KV Cache can be saved in each GPU
+    # 计算每个GPU可以保存多少token的KV缓存
     max_total_num_tokens = profile_max_num_token(total_gpu_memory)
 
-    # adjust max_num_requests
+    # 调整max_num_requests
     if max_num_reqs is None:
       max_num_reqs = min(
        max(max_total_num_tokens / model_config.context_len * 512, 2048),
        4096
     )
 
-    # adjust max_total_tokens
+    # 调整max_total_tokens
     if max_total_tokens is None:
       if max_total_tokens > max_total_num_tokens: logger.warning...
       max_total_num_tokens = min(max_total_tokens, max_total_num_tokens)
 
-    # align page size
+    # 按页大小对齐
     max_total_num_tokens = (max_total_num_tokens // page_size) * page_size
 
-    # init req_to_token_pool
+    # 初始化req_to_token_pool
     req_to_token_pool = ReqToTokenPool(
            max_num_reqs + 1,
            model_config.context_len + 4,
            ...)
 
-    # init token_to_kv_pool
+    # 初始化token_to_kv_pool
     token_to_kv_pool = MHATokenToKVPool(
            max_total_num_tokens,
            page_size,
@@ -108,7 +103,7 @@ class ModelRunner:
            layer_num,
            ...)
 
-    # init token_to_kv_pool_allocator
+    # 初始化token_to_kv_pool_allocator
     token_to_kv_pool_allocator = TokenToKVPoolAllocator(
         max_total_num_tokens,
         kv_cache_dtype,
@@ -118,72 +113,68 @@ class ModelRunner:
     ...END !!!
 
   def profile_max_num_token(total_gpu_memory):
-    # get min_per_gpu_memory in the world
-    # Note: model has been loaded before
+    # 获取全局最小的可用GPU内存
+    # 注意：此时模型已加载
     available_gpu_memory = get_available_gpu_memory(distributed=True)
 
-    # Compute how much gpu memory **a token's KV Cache** occupy
-    # Note: In TP settings, each GPU only handles part of `attention head` when computing attention scores
+    # 计算单个token的KV缓存占用的GPU内存
+    # 注意：在TP设置中，每个GPU仅处理部分`attention head`计算注意力分数
     cell_size = (
-      model_config.get_num_kv_heads(get_attention_tp_size()) # get how many num_kv_heads in TP setting
+      model_config.get_num_kv_heads(get_attention_tp_size())  # 获取TP设置下的num_kv_heads数量
      * model_config.head_dim
      * num_layers
-     * 2 # since K and V
-     * element_size(kv_cache_dtype) # bytes for each element of KV Cache Type
+     * 2  # 因为包含K和V
+     * element_size(kv_cache_dtype)  # KV缓存类型每个元素的字节数
     )
 
-    # This is the **role** of `mem_fraction_static` here
-    # Note:
-    # - `total_gpu_memory` is after initializing the distributed environment, min_per_gpu_memory
-    # - `available_gpu_memory` is after initializing the distbuted environment and loading model, min_per_gpu_memory
-    # - `total_gpu_memory * (1 - mem_fraction_static)`: the other potential GPU memory usage (like `activation` in the forward pass)
-    # - `rest_memory`: Free GPU Memory(after loading model) substracting the other GPU memory, the rest is for `KV Cache`
+    # 这是`mem_fraction_static`的核心作用
+    # 注意：
+    # - `total_gpu_memory`是初始化分布式环境后的min_per_gpu_memory
+    # - `available_gpu_memory`是初始化分布式环境并加载模型后的min_per_gpu_memory
+    # - `total_gpu_memory * (1 - mem_fraction_static)`：其他潜在的GPU内存使用（如前向传播中的`activation`）
+    # - `rest_memory`：加载模型后的空闲GPU内存减去其他GPU内存，剩余部分用于`KV缓存`
     rest_memory = available_gpu_memory - total_gpu_memory *
        (1 - mem_fraction_static)
 
-    # convert rest_memory from GigeByte back to Byte metric
-    # compute how many tokens' KV cache can be saved
+    # 将rest_memory从GB转换为字节单位
+    # 计算可以保存多少token的KV缓存
     max_num_tokens = int(rest_memory * (1 << 30) // cell_size)
     return max_num_tokens
 ```
 
-Reading from above simplified code reviews, we can see:
+通过上述简化代码，我们可以看出：
 
-1. `mem_fraction_static` ’s usage
+**mem_fraction_static的作用**: mem_fraction_static用于划分GPU内存给模型权重和KV缓存池。如果遇到内存不足错误，可以使用更小的值。具体流程如下：
 
-The `mem_fraction_static` of `GPU memory` is used for `model weights` and `KV Cache Pool`, Use a smaller value if you see out-of-memory errors. But how does the process go?
+1. 获取空闲GPU内存（M1：总空闲GPU内存）
+2. 加载模型（占用部分GPU内存）
+3. 再次获取空闲GPU内存（M2：加载模型后的空闲内存）
+4. 计算非静态GPU内存：M3 = M1 * (1 - mem_fraction_static)
+5. KV缓存池的内存：M2 - M3
 
-1. Get Free GPU Memory  (`M1`: total GPU free memory)
-2. Load model (this occupy some GPU Memory)
-3. Get Free GPU Memory again (`M2`: After Loading Model)
-4. Compute non-static GPU memory: (`M3 = M1 * (1 - mem_fraction_static)` )
-5. The memory for KV cache Pool: `M2 - M3`
+**单个token的KV缓存计算方式**： tp_num_head \* head_dim \* num_layers \* 2 \* element_size (torch._utils._element_size(kv_cache_dtype))
 
-1. How a token’s KV Cache is computed:
+### Managers
 
-`tp_num_head * head_dim * num_layers * 2 * element_size (torch._utils._element_size(kv_cache_dtype))`
+#### req_to_token_pool
 
-## Managers
+将请求映射到其token位置的内存池。
 
-### req_to_token_pool
+形状：max_num_reqs + 1 × self.model_config.context_len + 4
 
-A memory pool that maps a request to its token locations.
+数据类型：torch.int32
 
-Shape: `max_num_reqs *+* 1`  * `self.model_config.context_len *+* 4`
+访问方式：
 
-Dtype: `torch.int32`
-
-Access:
-
-- dim0: the concrete `req_idx`
-- dim1: token positions in req (starting from 0, 1, 2…), identify the specific token in the request
-- `out_cache_loc` for token, it points to the KV cache indices associated with the token identified by dim0 and dim1
+- dim0：具体的req_idx
+- dim1：请求中的token位置（从0, 1, 2...开始），标识请求中的特定token
+- 值(out_cache_loc)：指向与dim0和dim1标识的token关联的KV缓存索引
 
 ```python
 class ReqToTokenPool:
   def __init__(size, max_context_len):
     req_to_token = torch.zeros(size, max_context_len, dtype=torch.int32)
-    # record free slots
+    # 记录空闲槽位
     free_slots = list(range(size))
 
   def write(indices, values):
@@ -194,7 +185,7 @@ class ReqToTokenPool:
 
   def alloc(need_size):
     if need_size > len(free_slots): return None
-    # directly remove `need_size` slots
+    # 直接移除`need_size`个槽位
     select_index = free_slots[:need_size]
         free_slots = free_slots[need_size:]
         return select_index
@@ -206,29 +197,29 @@ class ReqToTokenPool:
     free_flost = list(range(size)
 ```
 
-### token_to_kv_pool
+#### token_to_kv_pool
 
-A pool that maps `out_cache_loc` from `req_token_pool` to its real KV Cache data
+将req_token_pool中的out_cache_loc映射到实际KV缓存数据
 
-Mainly maintain the `k_buffer` and `v_buffer` which has the same shape
+主要维护k_buffer和v_buffer，两者形状相同
 
-Shape(List of `Tensor`): `layer_num` *[ `Tensor` ], where each `Tensor`: `max_total_num_tokens + page_size`* `head_num`  * `head_dim`
+形状（Tensor列表）：layer_num × [Tensor]，其中每个Tensor：max_total_num_tokens + page_size × head_num × head_dim
 
-Access:
+访问方式：
 
-- dim0: `layer_id` identify the specific layer
-- dim1: `out_cache_loc` identify the specific KV cache indices
-- dim2: `head`
-- dim3: `head_dim`
-- value: real KV Cache data
+- dim0：layer_id标识特定层
+- dim1：out_cache_loc标识特定KV缓存索引
+- dim2：head
+- dim3：head_dim
+- 值：实际KV缓存数据
 
 ```python
 class MHATokenToKVPool(KVCache):
   def __init__(size, page_size, dtype, head_num, head_dim, layer_num, device, start_layer...):
-    # create real KV Cache buffers
+    # 创建实际KV缓存缓冲区
     _create_buffers()
     ############
-    # Now, each GPU Memory is nearly exhausted
+    # 此时，每个GPU内存几乎耗尽
     ###########
 
   def _create_buffers():
@@ -252,7 +243,7 @@ class MHATokenToKVPool(KVCache):
        del k_buffer, v_buffer
 
    ################
-   ## READ API
+   ## 读取API
    ################
    def get_key_buffer(layer_id):
      return k_buffer[layer_id - start_layer]
@@ -264,7 +255,7 @@ class MHATokenToKVPool(KVCache):
         return get_key_buffer(layer_id), get_value_buffer(layer_id)
 
     ############
-    ## WRITE API
+    ## 写入API
     ############
     def set_kv_buffer(layer, loc, cache_k, cache_v, ...):
       layer_id = layer.layer_id
@@ -272,9 +263,9 @@ class MHATokenToKVPool(KVCache):
          v_buffer[layer_id - start_layer][loc] = cache_v
 ```
 
-### token_to_kv_pool_allocator
+#### token_to_kv_pool_allocator
 
-used to allocate real KV Cache data: `out_cache_loc`
+用于分配实际KV缓存数据：out_cache_loc
 
 ```python
 class TokenToKVPoolAllocator:
@@ -289,7 +280,7 @@ class TokenToKVPoolAllocator:
     return len(free_slots)
 
   ##########################
-  # ALLOCATE API
+  # 分配API
    #########################
   def alloc(need_size):
     if need_size > len(self.free_slots): return None
@@ -298,58 +289,57 @@ class TokenToKVPoolAllocator:
         return select_index
 
     ###########################
-    ## FREE API
+    ## 释放API
     ###########################
     def free(free_index):
      free_slots = torch.cat((free_slots, free_index))
 ```
 
-## Allocate Slots to Reqs & out_cache_loc
+**为请求和out_cache_loc分配槽位**
+这就引出了一个问题：SGLang如何使用上述管理器高效地为每个请求中的token分配槽位并及时释放？
 
-This raises the question: how does `SGLang` use the above managers to efficiently allocate slots for each token in the requests and free them in a timely manner?
+LLM推理包含两个主要阶段。我们首先确定每个阶段的分配需求。
 
-LLM inference consists of two main stages. We start by identifying the allocation requirements for each stage.
+1. ​​预填充（prefill）​​：
+    1. req_to_token_pool.alloc：因为有新请求
+    2. token_to_kv_pool_allocator.alloc：可能，
+        1. 如果请求中的token已有KV缓存，可以直接使用req_to_token_pool.write复用这些KV缓存
+        2. 如果没有KV缓存，则调用token_to_kv_pool_allocator.alloc获取out_cache_loc，然后将其写入req_token_pool
+1. ​​解码（decode）​​：
+    1. req_to_token_pool.alloc：不需要
+    2. token_to_kv_pool_allocate.alloc：需要，因为每次解码一个新token
 
-1. prefill:
-    1. `req_to_token_pool.alloc` : since we have new reqs
-    2. `token_to_kv_pool_allocator.alloc` : Maybe,
-        1. if we have the `kv cache` in the tokens in the reqs, we can just use `req_to_token_pool.write` to reuse those kv cache
-        2. if we don’t have the `kv cache`, then get `out_cache_loc` by calling `token_to_kv_pool_allocator.alloc` , then write `out_cache_loc` into `req_token_pool`
-2. decode:
-    1. `req_to_token_pool.alloc` : don’t need
-    2. `token_to_kv_pool_allocate.alloc` Need, since we decode one new token one time
-
-So in the `scheduler.get_next_batch_to_run` where get `ScheduleBatch` , for different stage, there are different logics to prepare where allocate and free slots happened.
+因此，在scheduler.get_next_batch_to_run中获取ScheduleBatch时，不同阶段有不同的逻辑来处理分配和释放槽位。
 
 ```python
 class ScheduleBatch:
-    """Store all information of a batch on the scheduler."""
+    """存储调度器上一批次的所有信息"""
 
   def prepare_for_extend():
     bs = len(reqs)
     req_pool_indices = alloc_req_slots(bs)
 
     # fill_ids = origin_input_ids + output_ids
-    # input_ids are those token_ids whose KV Cache needs computing
+    # input_ids是需要计算KV缓存的token_ids
     input_ids = [r.fill_ids[len(r.prefix_indices): ] for r in reqs]
 
-    # this is the num tokens we need allocate slots to accommodate
+    # 这是需要分配槽位以容纳的token数量
     extend_num_tokens = sum(len(ids) for ids in input_ids)
 
     seq_lens = [len(r.fill_ids) for r in reqs]
     prefix_lens = [len(r.prefix_indices) for r in reqs]
 
-    # extend_lens is actually equal to `seq_lens - prefix_lens`
+    # extend_lens实际上等于`seq_lens - prefix_lens`
     extend_lens = [r.extend_input_len for r in reqs]
 
     for i, (req, seq_len, pre_len) in enumerate(reqs, seq_lens, pre_lens):
       req.req_pool_idx = req_pool_indices[i]
 
-      # here assert again
+      # 再次确认
       assert seq_len - pre_len == req.extend_input_len
 
       if pre_len > 0:
-        # write cached `out_cache_loc` into `req_to_token_pool`
+        # 将缓存的`out_cache_loc`写入`req_to_token_pool`
         req_to_token_pool.write(
                     (req.req_pool_idx, slice(0, pre_len)), req.prefix_indices
                 )
@@ -358,7 +348,7 @@ class ScheduleBatch:
 
        pt = 0
        for i in range(bs):
-         # write uncached `out_cache_loc` into `req_to_token_pool`
+         # 将未缓存的`out_cache_loc`写入`req_to_token_pool`
             for i in range(bs):
                 self.req_to_token_pool.write(
                     (req_pool_indices[i], slice(prefix_lens[i], seq_lens[i])),
@@ -370,13 +360,13 @@ class ScheduleBatch:
   def prepare_for_decode():
     bs = len(reqs)
 
-    # allocate `bs` tokens
+    # 分配`bs`个token
     out_cache_loc = self.alloc_token_slots(bs)
 
-    # compute `req_to_token_pool` locs
+    # 计算`req_to_token_pool`位置
     locs = seq_lens + 1
 
-    # write
+    # 写入
     req_to_token_pool.write(
             (req_pool_indices, locs), out_cache_loc.to(torch.int32)
         )
@@ -391,14 +381,12 @@ class ScheduleBatch:
     out_cache_loc = self.token_to_kv_pool_allocator.alloc(num_tokens)
     if out_cache_loc is None: raise RuntimeError()
     return out_cache_loc
-
 ```
 
-## Read & Save Real KV Cache Data when computing Attention Scores
+**计算注意力分数时读取和保存实际KV缓存数据**
+在前向传播中，model_runner会调用attention_backnend.init_forward_metadata初始化注意力后端的元数据，然后调用实际的forward_extend和forward_decode
 
-In model forward, `model_runner` will call `attention_backnend.init_forward_metadata` to initialize the metadata for the attention backend and then call the actual `forward_extend` and `forward_decode`
-
-during the `init_forward_metadata` , by use `req_to_token_pool.req_to_token` , we get the `page table` which is then used in each layer’s attention score computation
+在init_forward_metadata中，通过req_to_token_pool.req_to_token获取页表，用于每层注意力分数的计算
 
 ```python
 class FlashAttentionBackend(AttentionBackend):
@@ -406,15 +394,15 @@ class FlashAttentionBackend(AttentionBackend):
     metadata = FlashAttentionMetadata()
     if forward_batch.is_decode():
       metadata.max_seq_len_k = forward_batch.seq_lens_cpu.max().item()
-      # get the page table!
+      # 获取页表！
       metadata.page_table = forward_batch.req_to_token_pool.req_to_token[
                  forward_batch.req_pool_indices, : metadata.max_seq_len_k
              ]
      elif forward_batch.is_extend():
-       # ... nearly same ...
+       # ... 几乎相同 ...
 ```
 
-`save & retrieve` process takes place at the model forward, where `attention_backend.forward_extend` or `attention_backend.forward_extend`
+保存和检索过程发生在模型前向传播中，即attention_backend.forward_extend或attention_backend.forward_extend
 
 ```python
 class FlashAttention(AttentionBackend):
@@ -423,12 +411,12 @@ class FlashAttention(AttentionBackend):
       if v is not None:
         cache_loc = forward_batch.out_cache_loc
 
-        # !!! Save the KV Cache into token_to_kv_pool !!!
+        # !!! 将KV缓存保存到token_to_kv_pool !!!
         forward_batch.token_to_kv_pool.set_kv_buffer(
                         layer, cache_loc, k, v, ...
                     )
-       # Use precomputed metadata across all layers
-        # prepare metedata for FlashAttention operator
+       # 使用所有层预计算的元数据
+        # 为FlashAttention操作准备元数据
         metadata = self.forward_metadata
         page_table = metadata.page_table
         cu_seqlens_q = metadata.cu_seqlens_q
@@ -437,11 +425,11 @@ class FlashAttention(AttentionBackend):
         max_seqlen_k = metadata.max_seq_len_k
         cu_seqlens_k = metadata.cu_seqlens_k
 
-        # !!! Retrive the KV Cache from token_to_kv_pool !!!
+        # !!! 从token_to_kv_pool检索KV缓存 !!!
         key_cache, value_cache = forward_batch.token_to_kv_pool.get_kv_buffer(
                 layer.layer_id
             )
-        # review the format
+        # 检查格式
         key_cache = key_cache.view(
                 -1, self.page_size, layer.tp_k_head_num, layer.head_dim
             )
@@ -460,60 +448,57 @@ class FlashAttention(AttentionBackend):
        return o.view(-1, layer.tp_q_head_num * layer.v_head_dim)
 
   def forward_decode(forward_batch):
-    # ... nearly same to forward_extend ...
+    # ... 几乎与forward_extend相同 ...
 ```
 
-The first section `KV Cache Management` is over here, we talked about
+第一部分KV缓存管理到此结束，我们讨论了：
 
-1. How `KV Cache` are initiated
-2. How `KV Cache` is manged (allocate `slots, tokens` to reqs)
-3. How the real `KV Cache data` are saved and retrieved when computing attention scores
+KV缓存如何初始化
+KV缓存如何管理（为请求分配槽位和token）
+计算注意力分数时如何保存和检索实际KV缓存数据
 
-# Radix Tree Cache
+## Radix Tree Cache
 
-One novel idea of `SGLang` is `Radix Attention` , which uses `radix tree` to reuse `KV Cache` as much as possible.
+SGLang的一个创新思想是基数注意力，它使用基数树尽可能复用KV缓存
 
-So, what is `Radix Tree`?
+那么，什么是基数树？
 
-Its core idea is to get prefix
+其核心思想是获取前缀
 
-## Radix Tree
+### Radix Tree
 
 ```python
 class TreeNode:
-
     counter = 0
 
     def __init__(self, id: Optional[int] = None):
-        self.children = defaultdict(TreeNode) # use 1page-size key as the dict_key
+        self.children = defaultdict(TreeNode)  # 使用1页大小的key作为字典键
         self.parent = None
-        self.key = None # Key is the `token_ids`
-        self.value = None # Value is the `out_cache_loc`, which records the location of real KV Cache data
+        self.key = None  # Key是`token_ids`
+        self.value = None  # Value是`out_cache_loc`，记录实际KV缓存数据的位置
 
-        self.lock_ref = 0 # how many reqs reference this node
+        self.lock_ref = 0  # 有多少请求引用此节点
 
         self.last_access_time = time.monotonic()
 
         self.hit_count = 0
 
-        # indicating the node is loading KV cache from host
+        # 表示节点正在从主机加载KV缓存
         self.loading = False
 
-        # store the host indices of KV cache
+        # 存储KV缓存的主机索引
         self.host_value = None
 
         self.id = TreeNode.counter if id is None else id
         TreeNode.counter += 1
-```
 
-```python
 class RadixTree(BasePrefixCache):
   def __init__(req_to_token_pool, token_to_kv_pool_allocator, page_size, ...):
     if page_size == 1:
-      # key_match_fn: given 2 keys, return how many prefix ids that two keys has
+      # key_match_fn：给定两个key，返回它们共有的前缀ids数量
             key_match_fn = _key_match_page_size1
 
-            # get_child_key_fn: get 1-page-size key
+            # get_child_key_fn：获取1页大小的key
             get_child_key_fn = lambda key: key[0]
         else:
             key_match_fn = partial(_key_match_paged, page_size=page_size)
@@ -530,11 +515,11 @@ class RadixTree(BasePrefixCache):
         self._record_all_cleared_event()
 ```
 
-### Match
+#### 匹配
 
 ```python
   ########################
-   # Match Prefix
+   # 匹配前缀
    ########################
    def match_prefix(key: List[int]):
      page_aligned_len = len(key) // page_size * page_size
@@ -544,15 +529,15 @@ class RadixTree(BasePrefixCache):
        if value: value = torch.cat(value)
        else: value = torch.empty((0,), dtype=torch.int64, device=device)
 
-       # 1. prefix `out_cache_loc` in the radix tree
+       # 1. 基数树中的前缀`out_cache_loc`
        # 2. last_node
       return value, last_node
 
   def _match_prefix_helper(node, key):
-    # update time
+    # 更新时间
     node.last_access_time = time.monotonic()
 
-    # get child key first
+    # 先获取子key
     child_key = self.get_child_key_fn(key)
 
     value = []
@@ -560,32 +545,32 @@ class RadixTree(BasePrefixCache):
 
       child = node.children[child_key]
 
-      # update time
+      # 更新时间
       child.last_access_time = time.monotonic()
 
-      # get how many number of prefix ids (n * page_size)
+      # 获取前缀ids的数量（n * page_size）
       prefix_len = self.key_match_fn(child.key, key)
 
       if prefix_len < len(child.key):
-        # not a full match, split a full match, but shorter new_node
+        # 不完全匹配，拆分一个完全匹配但更短的new_node
 
-        # NOTE: prefix_len is at least 1-page-size since `child_key in node.children.keys()`
+        # 注意：prefix_len至少为1页大小，因为`child_key in node.children.keys()`
         new_node = self._split_node(child.key, child, prefix_len)
 
-        # append the matched value
+        # 追加匹配的值
         value.append(new_node.value)
                node = new_node
                break
       else:
-        # full match, try to get next child
+        # 完全匹配，尝试获取下一个子节点
 
-        # save the value
+        # 保存值
         value.append(child.value)
 
-        # update the node
+        # 更新节点
                node = child
 
-               # truncate the prefix matched keys
+               # 截断已匹配的前缀key
                key = key[prefix_len:]
 
                if len(key):
@@ -593,56 +578,56 @@ class RadixTree(BasePrefixCache):
        return value, node
 ```
 
-### Split Node
+拆分节点：
 
-```python
+```
   #############
-   # Split Node
+   # 拆分节点
    #############
   def _split_node(key: List[int], child, split_len):
-    # here, key is actually child's key
-    # key and value will be split into two parts
-    # key and value: [......................... | ..........................]
+    # 这里的key实际上是子节点的key
+    # key和value将被分成两部分
+    # key和value: [......................... | ..........................]
     #                                       prefix_len
-    #                  left: a new node's kv        right: truncated child
-    # after this split process, `child(node)` will be
+    #                  左侧：新节点的kv        右侧：截断的子节点
+    # 拆分后，`child(node)`将变为
     # `parent <-> child`    =>
     # `parent <-> new_node <-> truncated child`
 
-    # create a new node
+    # 创建新节点
     new_node = TreeNode()
 
-    # make `new_node ---truncated child's 1-page-size key---> child`
+    # 使`new_node ---截断子节点的1页大小key---> child`
     new_node.children = {self.get_child_key_fn(key[split_len:]): child}
 
-       # make `parent -> new_node`
+       # 使`parent -> new_node`
        new_node.parent = child.parent
 
-       # make new_node get the same ref count
+       # 使new_node获得相同的引用计数
        new_node.lock_ref = child.lock_ref
 
-       # get left side kv, and set them to new_node
+       # 获取左侧kv，并设置给new_node
        new_node.key = child.key[:split_len]
        new_node.value = child.value[:split_len]
 
-    # make `new_node <- child`
+    # 使`new_node <- child`
        child.parent = new_node
 
-       # make `child` become `truncated child`: truncate the split_len key and value
+       # 使`child`变为`截断的子节点`：截断split_len的key和value
        child.key = child.key[split_len:]
        child.value = child.value[split_len:]
 
-       # make `parent ----new_node's 1-page-size key---> new_node
+       # 使`parent ----new_node的1页大小key---> new_node
        new_node.parent.children[self.get_child_key_fn(key)] = new_node
 
     return new_node
 ```
 
-### Insert Node
+#### 插入节点
 
 ```python
  ################
- # Insert Node
+ # 插入节点
  ################
  def insert(self, key: List, value=None):
      if self.disable: return 0
@@ -652,142 +637,105 @@ class RadixTree(BasePrefixCache):
      return _insert_helper(root_node, key, value)
 
   def _insert_helper(node, key, value):
-    # update node's time for LRU eviction
+    # 更新节点时间用于LRU淘汰
     node.last_access_time = time.monotonic()
 
       if len(key) == 0: return 0
 
-      # get 1-page-size key used for searching prefix
+      # 获取用于搜索前缀的1页大小key
       child_key = get_child_key_fn(key)
 
       total_prefix_length = 0
 
       while len(key) > 0 and child_key in node.children.keys():
-      # get next node
+      # 获取下一个节点
       node = node.children[child_key]
-      # update next node's time
+      # 更新下一个节点的时间
       node.last_access_time = time.monotonic()
 
-      # get prefix_len of next node and query key
+      # 获取下一个节点和查询key的前缀长度
       prefix_len = self.key_match_fn(node.key, key)
 
       total_prefix_length += prefix_len
 
-      # update key and value
+      # 更新key和value
       key = key[prefix_len:]
           value = value[prefix_len:]
 
           if prefix_len < len(node.key):
-            # not a full match, split the node
+            # 不完全匹配，拆分节点
             new_node = _split_node(node.key, node, prefix_len)
 
               node = new_node
 
           if len(key):
-            # there are still some keys hasn't been matched, try to continue to find next node
+            # 仍有部分key未匹配，尝试继续查找下一个节点
             child_key = get_child_key_fn(key)
 
-            # NOTE: if prefix_len < len(node.key)
-            # then it is impossible to continue this while loop
-            # because the splitted new node only have one child, which is the unmatched node
-            # so this new `child_key` doesn't exist `node.children.keys()`
-            # this while loop continues only if a full match, but the query key still has a remaining part
+            # 注意：如果prefix_len < len(node.key)
+            # 则无法继续此while循环
+            # 因为拆分后的新节点只有一个子节点，即未匹配的节点
+            # 所以这个新的`child_key`不在`node.children.keys()`中
+            # 此while循环仅在完全匹配但查询key仍有剩余部分时继续
 
    if len(key):
-     # if there exists still a remaining key that doesn't match in this radix tree,
-     # create a new node
-     # NOTE: this new node's lock_ref is 0, so it deems evictable
+     # 如果仍有未匹配的剩余key，
+     # 创建新节点
+     # 注意：此新节点的lock_ref为0，因此可被淘汰
      new_node = TreeNode()
           new_node.parent = node
           new_node.key = key
           new_node.value = value
 
-          # make node` point to this `new_node`
+          # 使node`指向此`new_node`
           node.children[child_key] = new_node
 
-          # this is evictable since it is a leaf node
+          # 这是可淘汰的，因为它是叶节点
           evictable_size_ += len(value)
 
    return total_prefix_length
 ```
 
-### Lock Ref
+#### API
 
-```python
-
- ##################
- # Handle Lock Ref
- ##################
-  def dec_lock_ref(node):
-   if disable: return 0 # if disable radix tree
-   delta = 0
-
-   # bottom to up
-   while node != root_node:
-     if node.lock_ref == 1:
-       # if there is only 1 ref to this node, this node deems evictable
-           evictable_size_ += len(node.value)
-             protected_size_ -= len(node.value)
-             delta += len(node.value)
-         lock_ref -= 1
-         node = node.parent
-    return delta
-
- def inc_lock_ref(node):
-   if disable: return 0
-   delta = 0
-
-   # bottom to up
-   while node != root_node:
-     if node.lock_ref == 0:
-       # if no other req ref this node, this node turns evictable to protectable
-       evictable_size_ -= len(node.value)
-             self.protected_size_ += len(node.value)
-             delta -= len(node.value)
-     node.lock_ref += 1
-   return delta
-```
-
-### API
-
-- Cache when request finished or unfished
-- Evcit
+- 请求完成或未完成时的缓存
+- 删除不需要的缓存
 
 ```python
  #######################
- # Cache Unfinished Req
+ # 缓存未完成的请求
   #######################
   def cache_unfinished_req(req):
     token_ids = req.fill_ids
 
-    # get `out_cache_loc`, which is actually Value
+    # 获取`out_cache_loc`，即Value
     kv_indices = req_to_token_pool.req_to_token[
             req.req_pool_idx, : len(token_ids)
       ]
 
       if page_size != 1:
         page_aligned_len = len(kv_indices) // page_size * page_size
-        # V align
+        # 对齐V
           page_aligned_kv_indices = kv_indices[:page_aligned_len].clone()
       else:
           page_aligned_len = len(kv_indices)
           page_aligned_kv_indices = kv_indices.clone()
 
-      # K align
+      # 对齐K
       page_aligned_token_ids = token_ids[:page_aligned_len]
 
-      # insert K,V
+      # 插入K,V
       new_prefix_len = insert(page_aligned_token_ids, page_aligned_kv_indices)
 
-      # remove repetive part
+      # 移除重复部分
       token_to_kv_pool_allocator.free(
             kv_indices[len(req.prefix_indices) : new_prefix_len]
       )
 
-      #  get prefixed `out_cache_loc` and `new_last_node`
+      # 获取前缀`out_cache_loc`和`new_last_node`
       new_indices, new_last_node = self.match_prefix(page_aligned_token_ids)
 
-      # only write new `out_cache_loc`
+      # 仅写入新的`out_cache_loc`
       req_to_token_pool.write(
             (req.req_pool_idx, slice(len(req.prefix_indices), len(new_indices))),
             new_indices[len(req.prefix_indices) :],
@@ -803,59 +751,59 @@ class RadixTree(BasePrefixCache):
 
 
  #####################
- # Cache Finished Req
+ # 缓存完成的请求
  #####################
   def cache_finished_req(req):
    if self.disable:
-     # if disable radix tree, free the KV Cache of this finished req directly
+     # 如果禁用基数树，直接释放此完成请求的KV缓存
 
-     # get `out_cache_loc`
+     # 获取`out_cache_loc`
      kv_indices = req_to_token_pool.req_to_token[
               req.req_pool_idx, : len(req.origin_input_ids) + len(req.output_ids) - 1
           ]
 
-          # free `req slots` and `token_to_kv_pool slots`
+          # 释放`req槽位`和`token_to_kv_pool槽位`
           token_to_kv_pool_allocator.free(kv_indices)
           req_to_token_pool.free(req.req_pool_idx)
           return
 
-     # if using radix tree, don't free KV Cache instantly for reusing opportunities
+     # 如果使用基数树，不立即释放KV缓存以便复用
 
-     # get token_ids, which is actually key
+     # 获取token_ids，即key
      token_ids = (req.origin_input_ids + req.output_ids)[:-1]
 
-     # get `out_cache_loc`, which is actually value
+     # 获取`out_cache_loc`，即value
      kv_indices = req_to_token_pool.req_to_token[
         req.req_pool_idx, : len(token_ids)
     ]
 
-    # assuming page size is 1, so it is automatically aligned
+    # 假设页大小为1，因此自动对齐
     page_aligned_len = len(kv_indices)
      page_aligned_kv_indices = kv_indices.clone()
 
-    # insert the [token_ids, out_cache_loc] into radix tree for reuse
+    # 将[token_ids, out_cache_loc]插入基数树以便复用
     new_prefix_len = insert(
          token_ids[:page_aligned_len], page_aligned_kv_indices
     )
 
-     # only free [len(prefix_indices): new_prefix_len] part of kv pool, why?
-     # since these part of `out_cache_loc` are REPETITIVE (REDUNDANT)!
+     # 仅释放[len(prefix_indices): new_prefix_len]部分的kv池，为什么？
+     # 因为这部分`out_cache_loc`是重复的（冗余的）！
 
-     # The whole process is as follows:
-     # `req.prefix_indices` is computed when it is scheduled at first
-     # `new_prefix_len` is the prefix lens when it is finished
-     # [len(req.prefix_indices): new_prefix_len] is the repetive part during which computed
+     # 整个过程如下：
+     # `req.prefix_indices`在首次调度时计算
+     # `new_prefix_len`是完成时的前缀长度
+     # [len(req.prefix_indices): new_prefix_len]是计算过程中重复的部分
     token_to_kv_pool_allocator.free(
           kv_indices[len(req.prefix_indices) : new_prefix_len]
      )
 
-     # free `req slot` for sure
-     # since the req has been finished, its req_pool_idx can be used for other reqs
+     # 释放`req槽位`
+     # 因为请求已完成，其req_pool_idx可用于其他请求
      req_to_token_pool.free(req.req_pool_idx)
 
-     # dec lock_ref of those node owns out_cache_loc[:len(prefix_indices)]
-     # these part will be possibly evictable
-     # but Note: these `out_cache_loc` have not been evicted yet
+     # 减少拥有out_cache_loc[:len(prefix_indices)]的节点的lock_ref
+     # 这些部分可能变为可淘汰
+     # 但注意：这些`out_cache_loc`尚未被淘汰
      dec_lock_ref(req.last_node)
 ```
 
@@ -865,7 +813,7 @@ class RadixTree(BasePrefixCache):
 
     leaves = _collect_leaves()
 
-    # sort by `last_access_time` (LRU)
+    # 按`last_access_time`排序（LRU）
     heapq.heapify(leaves)
 
     num_evicted = 0
@@ -873,39 +821,36 @@ class RadixTree(BasePrefixCache):
       x = heapq.heappop(leaves)
       if x == self.root_node: break
 
-      # if some reqs are pointing to this node, skip it
+      # 如果有请求指向此节点，跳过
             if x.lock_ref > 0: continue
 
-            # free this node's `out_cache_loc`
+            # 释放此节点的`out_cache_loc`
             token_to_kv_pool_allocator.free(x.value)
 
             num_evicted += len(x.value)
             _delete_leaf(x)
 
-            # add new leaves node for next evitable
+            # 为下一次淘汰添加新的叶节点
             if len(x.parent.children) == 0:
                 heapq.heappush(leaves, x.parent)
 
   def _delete_leaf(node):
 
-    # delete this node from its parent
+    # 从父节点中删除此节点
     for k, v in node.parent.children.items():
             if v == node:
                 break
         del node.parent.children[k]
 
-        # update evicatble_size
+        # 更新可淘汰大小
         evictable_size_ -= len(node.key)
 
 ```
 
-## Usage
+-- --
+**使用方式**
 
-How to use the above API provided by `radix_cache_tree` ?
-
-### Cache
-
-When `prefill` is over,
+1. 当prefill结束时，
 
 ```python
 def process_batch_result_prefill(batch, result):
@@ -917,11 +862,11 @@ def process_batch_result_prefill(batch, result):
           tree_cache.cache_finished_req(req)
 
        elif not batch.decoding_reqs or req not in batch.decoding_reqs:
-            # This updates radix so others can match
+            # 更新基数树以便其他请求匹配
             tree_cache.cache_unfinished_req(req)
 ```
 
-When `decode`  is over,
+2. 当decode结束时，
 
 ```python
 def process_batch_result_decode(batch, result):
@@ -932,16 +877,13 @@ def process_batch_result_decode(batch, result):
            tree_cache.cache_finished_req(req)
 ```
 
-<aside>
-💡
-
-Only when `decode` finished, tree_cache cached its (`token_ids, out_cache_loc` )
+<aside> 💡
+只有在decode完成时，tree_cache才会缓存其（token_ids, out_cache_loc）
 
 </aside>
 
-### Evict
-
-Evict, which is also free `out_cache_loc` , happened when available_size in `token_to_kv_pool` cannot support the incoming req
+**删除不需要的缓存**:
+当token_to_kv_pool中的available_size无法支持传入请求时，会发生淘汰（即释放out_cache_loc）
 
 ```python
 def alloc_token_slots(num_tokens: int, backup_state: bool = False):
@@ -952,6 +894,6 @@ def alloc_token_slots(num_tokens: int, backup_state: bool = False):
   out_cache_loc = token_to_kv_pool_allocator.alloc(num_tokens)
 ```
 
-# Reference
+## 参考
 
-- <https://hebiao064.github.io/fa3-attn-backend-basic>
+- [https://hebiao064.github.io/fa3-attn-backend-basic](https://hebiao064.github.io/fa3-attn-backend-basic)
