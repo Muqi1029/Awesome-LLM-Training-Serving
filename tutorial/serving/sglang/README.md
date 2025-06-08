@@ -48,7 +48,7 @@ def chat_completion(messages: List[Dict[str, Any]]) -> str:
     return response.choices[0].message.content
 ```
 
-1. requests
+2. requests
 
 > All the params
 
