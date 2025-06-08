@@ -1,9 +1,6 @@
+[submodule "tutorial/operator/triton/Triton-Puzzles-Lite"]
+	path = tutorial/operator/triton/Triton-Puzzles-Lite
+	url = git@github.com:SiriusNEO/Triton-Puzzles-Lite.git
 [submodule "tutorial/operator/triton/Liger-Kernel"]
 	path = tutorial/operator/triton/Liger-Kernel
 	url = git@github.com:linkedin/Liger-Kernel.git
-[submodule "tutorial/training/megatron/Megatron-LM"]
-	path = tutorial/training/megatron/Megatron-LM
-	url = git@github.com:NVIDIA/Megatron-LM.git
-[submodule "tutorial/training/llama_factory/LLaMA-Factory"]
-	path = tutorial/training/llama_factory/LLaMA-Factory
-	url = git@github.com:hiyouga/LLaMA-Factory.git
