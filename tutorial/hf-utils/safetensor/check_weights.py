@@ -1,5 +1,6 @@
 # python check_weights.py --model-path THUDM/GLM-4-9B-0414
 import argparse
+import os
 from glob import glob
 
 from huggingface_hub import snapshot_download
@@ -9,7 +10,10 @@ from safetensors.torch import load_file
 def download_from_hub(model_path, cache_dir=None):
     # if cache_dir is None, use the default cache directory:
     # "${HF_HOME}/hub" = "~/.cache/huggingface/hub"
-    dir_path = snapshot_download(model_path, cache_dir=cache_dir)
+    if not os.path.isdir(model_path):
+        dir_path = snapshot_download(model_path, cache_dir=cache_dir)
+    else:
+        dir_path = model_path
     print(f"\n📦 Model downloaded to: {dir_path}\n")
 
     total_params = 0
@@ -54,9 +58,10 @@ def download_from_hub(model_path, cache_dir=None):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-path", type=str, required=True)
+    parser.add_argument("--cache-dir", type=str, default=None)
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    download_from_hub(args.model_path)
+    download_from_hub(args.model_path, args.cache_dir)
