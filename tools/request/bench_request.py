@@ -2,10 +2,11 @@
 this request is specailly written for Qwen3-235B-A22B-FP8 Model
 """
 
-from transformers import AutoTokenizer
 import os
 from argparse import ArgumentParser
+
 import requests
+from transformers import AutoTokenizer
 
 # global args
 input_len = 127 * 1024

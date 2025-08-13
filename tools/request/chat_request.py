@@ -1,8 +1,6 @@
-from openai import OpenAI
 from argparse import ArgumentParser
 
-
-client = OpenAI(base_url='http://127.0.0.1:8888/v1', api_key="Bear None")
+from openai import OpenAI
 
 tools = [
     {
@@ -34,12 +32,13 @@ tools = [
     }
 ]
 
+
 def stream_chat(args):
     extra_body = {
         "chat_template_kwargs": (
             {"enable_thinking": False} if args.disable_thinking else {}
         ),
-        "separate_reasoning": False,
+        "separate_reasoning": True,
     }
 
     responses = client.chat.completions.create(
@@ -47,17 +46,20 @@ def stream_chat(args):
         messages=[{"role": "user", "content": args.prompt}],
         extra_body=extra_body,
         stream=True,
+        temperature=0.6,
+        top_p=0.95,
+        # min_p=0,
     )
     # for choice in responses.choices:
     #     print(choice.message.content, end='')
     for chunk in responses:
         content = chunk.choices[0].delta.content
         if content:
-            print(content, end='')
+            print(content, end="")
     print()
 
 
-def request(args):
+def tool_request(args):
     extra_body = {
         "chat_template_kwargs": (
             {"enable_thinking": False} if args.disable_thinking else {}
@@ -79,10 +81,13 @@ def request(args):
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--prompt", type=str, required=True)
+    parser.add_argument("--port", type=int, default=30000)
     parser.add_argument("--disable-thinking", action="store_true")
     parser.add_argument("--stream", action="store_true")
+    parser.add_argument("--tool", action="store_true")
     args = parser.parse_args()
+    client = OpenAI(base_url=f"http://127.0.0.1:{args.port}/v1", api_key="Bear None")
     if args.stream:
         stream_chat(args)
-    else:
-        request(args)
+    elif args.tools:
+        tool_request(args)
