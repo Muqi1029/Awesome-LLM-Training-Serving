@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 from argparse import ArgumentParser
@@ -45,18 +46,39 @@ def parse_args():
     return parser.parse_args()
 
 
-def check_slo():
-    run(...)
-    if ...:
-        return True
-    return False
+def read_jsonl(filepath):
+    data = []
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            data.append(json.loads(line))
+    return data
 
 
-def run(request_rate, args):
+def check_slo(request_rate, args):
+    print(f"[SLO Mode] Benchmarking {request_rate}")
+    output_file = f"{args.output_dir}/slo.jsonl"
+    run(request_rate, args, output_file=output_file)
+    data = read_jsonl(output_file)
+    for item in data:
+        if item["request_rate"] != request_rate:
+            continue
+
+        if (
+            item["p99_ttft_ms"] > 3000
+            or item["p99_tpot_ms"] > 100
+            or item["p99_itl_ms"] > 100
+        ):
+            return False
+    return True
+
+
+def run(request_rate, args, output_file=None):
     if args.num_prompt is None:
         args.num_prompt = request_rate * args.num_prompt_ratio
 
-    output_file = f"{args.output_dir}/{datetime.now().strftime("%m%d")}_input{args.random_input_len}_output{args.random_output_len}.jsonl"
+    if output_file is None:
+        output_file = f"{args.output_dir}/{datetime.now().strftime("%m%d")}_input{args.random_input_len}_output{args.random_output_len}.jsonl"
+
     subprocess.run(
         [
             "python",
@@ -97,15 +119,18 @@ def warmup(args):
 
 def test_slo():
     left, right = args.left, args.right
-    while left <= right:
+    while left < right:
         mid = (left + right) // 2
-        res = check_slo(mid, args)
+        is_ok = check_slo(mid, args)
 
-        if res > 0:
-            left = mid
+        if is_ok:
+            left = mid + 1
         else:
             # not satisfy
-            right = mid - 1
+            right = mid
+
+    # TODO: save results to some files
+    print(f"The maximum concurrency satisfying SLO is {left - 1}")
 
 
 def test_general(args):
@@ -115,6 +140,7 @@ def test_general(args):
 
 
 def main(args):
+    warmup()
     if args.mode == "general":
         test_general(args)
     elif args.mode == "slo":
@@ -129,6 +155,8 @@ def prepare_run(args):
     if args.output_dir:
         args.output_dir = args.output_dir.strip("/ \t\n")
         os.makedirs(args.output_dir, exist_ok=True)
+    else:
+        args.output_dir = "."
 
 
 if __name__ == "__main__":
