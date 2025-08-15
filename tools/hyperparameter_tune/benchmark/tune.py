@@ -4,6 +4,10 @@ import subprocess
 from argparse import ArgumentParser
 from datetime import datetime
 
+import plotly.graph_objects as go
+
+colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+
 
 def parse_args():
     parser = ArgumentParser()
@@ -101,13 +105,17 @@ def warmup(args):
 
 def check_slo(request_rate, args):
     print(f"[SLO Mode] Benchmarking {request_rate}")
+
+    # TODO: special filename
     output_file = f"{args.output_dir}/slo.jsonl"
+
     run(request_rate, args, output_file=output_file)
     data = read_jsonl(output_file)
     for item in data:
         if item["request_rate"] != request_rate:
             continue
 
+        # TODO: more flexible SLO condition args
         if (
             item["p99_ttft_ms"] > 3000
             or item["p99_tpot_ms"] > 100
@@ -124,13 +132,13 @@ def test_slo():
         is_ok = check_slo(mid, args)
 
         if is_ok:
-            left = mid + 1
+            left = mid
         else:
             # not satisfy
             right = mid - 1
 
     # TODO: save results to some files
-    print(f"The maximum concurrency satisfying SLO is {left}")
+    print(f"\033[92m The maximum concurrency satisfying SLO is {left} \033[0m")
 
 
 def test_general(args):
@@ -139,16 +147,53 @@ def test_general(args):
         run(request_rate, args)
 
 
+def plot_slo(args):
+    # prepare data
+    output_file = f"{args.output_dir}/slo.jsonl"
+    data = read_jsonl(output_file)
+    x = [item["request_rate"] for item in data]
+
+    # TODO: hardcode here
+    for i, metric in enumerate(["p99_ttft_ms"]):
+        fig = go.Figure()
+        y = [item[metric] for item in data]
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=y,
+                mode="markers+lines",
+                name=metric,  # label
+                line=dict(color=colors[i % len(colors)], width=3),  # line args
+                marker=dict(size=8),  # marker ars
+                hovertemplate=f"<br>Request Rate: %{{x}}<br>{metric}: %{{y}}<br><extra></extra>",
+            )
+        )
+        fig.write_html(os.path.join(args.output_dir, f"{metric}.html"))
+
+
+def plot_general(args):
+    ...
+    # fig = go.Figure()
+    # fig.add_trace(
+    #     go.Scatter(
+    #         x=,
+    #         y=,
+    #         mode="lines+markers",
+    #         name=f"TP {}"
+    #     )
+    # )
+
+
 def main(args):
-    warmup()
+    warmup()  # warmup the server to prevent instability
     if args.mode == "general":
         test_general(args)
+        plot_general(args)
     elif args.mode == "slo":
         test_slo(args)
     else:
         raise NotImplementedError(f"{args.mode} has not been supported yet")
     print("Generating all test data, now starting graph")
-    # plot()
 
 
 def prepare_run(args):
