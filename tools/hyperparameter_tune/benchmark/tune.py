@@ -54,24 +54,6 @@ def read_jsonl(filepath):
     return data
 
 
-def check_slo(request_rate, args):
-    print(f"[SLO Mode] Benchmarking {request_rate}")
-    output_file = f"{args.output_dir}/slo.jsonl"
-    run(request_rate, args, output_file=output_file)
-    data = read_jsonl(output_file)
-    for item in data:
-        if item["request_rate"] != request_rate:
-            continue
-
-        if (
-            item["p99_ttft_ms"] > 3000
-            or item["p99_tpot_ms"] > 100
-            or item["p99_itl_ms"] > 100
-        ):
-            return False
-    return True
-
-
 def run(request_rate, args, output_file=None):
     if args.num_prompt is None:
         args.num_prompt = request_rate * args.num_prompt_ratio
@@ -117,9 +99,27 @@ def warmup(args):
     run(32, args)
 
 
+def check_slo(request_rate, args):
+    print(f"[SLO Mode] Benchmarking {request_rate}")
+    output_file = f"{args.output_dir}/slo.jsonl"
+    run(request_rate, args, output_file=output_file)
+    data = read_jsonl(output_file)
+    for item in data:
+        if item["request_rate"] != request_rate:
+            continue
+
+        if (
+            item["p99_ttft_ms"] > 3000
+            or item["p99_tpot_ms"] > 100
+            or item["p99_itl_ms"] > 100
+        ):
+            return False
+    return True
+
+
 def test_slo():
     left, right = args.left, args.right
-    while left < right:
+    while left < right - 1:
         mid = (left + right) // 2
         is_ok = check_slo(mid, args)
 
@@ -127,10 +127,10 @@ def test_slo():
             left = mid + 1
         else:
             # not satisfy
-            right = mid
+            right = mid - 1
 
     # TODO: save results to some files
-    print(f"The maximum concurrency satisfying SLO is {left - 1}")
+    print(f"The maximum concurrency satisfying SLO is {left}")
 
 
 def test_general(args):

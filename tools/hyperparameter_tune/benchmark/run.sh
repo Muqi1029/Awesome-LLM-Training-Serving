@@ -9,7 +9,7 @@ host=127.0.0.1
 random_input_len=1200
 random_output_len=800
 
-export CUDA_VISIBLE_DEVICES=7
+# export CUDA_VISIBLE_DEVICES=7
 
 ###################
 ## Starting Server
@@ -52,11 +52,19 @@ if ! kill -0 "$server_pid" 2>/dev/null; then
 fi
 
 echo "Running Python tuning script..."
+# python tune.py --host "${host}" \
+# 	--port "${port}" \
+# 	--left 5 \
+# 	--right 6 \
+# 	--mode general \
+# 	--random-input-len ${random_input_len} \
+# 	--random-output-len ${random_output_len} \
+# 	--output-dir test1
 python tune.py --host "${host}" \
 	--port "${port}" \
-	--left 5 \
-	--right 6 \
-	--mode general \
+	--left 1 \
+	--right 10 \
+	--mode slo \
 	--random-input-len ${random_input_len} \
 	--random-output-len ${random_output_len} \
 	--output-dir test1
