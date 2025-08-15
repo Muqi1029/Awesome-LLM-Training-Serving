@@ -5,6 +5,7 @@ set -euo pipefail
 # args
 port=8888
 host=127.0.0.1
+model_path=$QWEN306B
 
 random_input_len=1200
 random_output_len=800
@@ -14,7 +15,7 @@ random_output_len=800
 ###################
 ## Starting Server
 echo "Starting server on ${host}:${port}..."
-python -m sglang.launch_server --model-path "$QWEN306B" --host "${host}" --port "${port}" \
+python -m sglang.launch_server --model-path "${model_path}" --host "${host}" --port "${port}" \
 	> server.log 2>&1 &
 
 server_pid=$!
@@ -52,14 +53,6 @@ if ! kill -0 "$server_pid" 2>/dev/null; then
 fi
 
 echo "Running Python tuning script..."
-# python tune.py --host "${host}" \
-# 	--port "${port}" \
-# 	--left 5 \
-# 	--right 6 \
-# 	--mode general \
-# 	--random-input-len ${random_input_len} \
-# 	--random-output-len ${random_output_len} \
-# 	--output-dir test1
 python tune.py --host "${host}" \
 	--port "${port}" \
 	--left 1 \
