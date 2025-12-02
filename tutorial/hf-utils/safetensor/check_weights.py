@@ -34,24 +34,24 @@ def download_from_hub(model_path, cache_dir=None):
         # Print summary header
         print("\n📊 Weight Summary:")
         print("-" * 100)
-        print(f"{'Layer Name':<50} {'Shape':<30} {'Dtype':<20}")
+        print(f"{'Layer Name':<60} {'Shape':<30} {'Dtype':<20}")
         print("-" * 100)
 
         # Print each layer's information
         for key, value in state_dict.items():
             # key: str, value: Tensor
             total_bytes += value.numel() * value.element_size()
-            print(f"{key:<50} {str(value.shape):<30} {str(value.dtype):<20}")
+            print(f"{key:<60} {str(value.shape):<30} {str(value.dtype):<20}")
             num_weights += 1
 
         print("-" * 100)
         print(f"parameters: {num_params:,}")
 
     print("Summarization of all weights".center(100, "-"))
-    print(f"{'Total parameters:':<30} {total_params:<15,}")
-    print(f"{'Num of weight files:':<30} {len(weight_files):<15}")
-    print(f"{'Num of weights:':<30} {num_weights:<15}")
-    print(f"{'Total bytes:':<30} {total_bytes / 1024 / 1024 / 1024:<15.2f} GB")
+    print(f"{'Total parameters:':<40} {total_params:<15,}")
+    print(f"{'Num of weight files:':<40} {len(weight_files):<15}")
+    print(f"{'Num of weights:':<40} {num_weights:<15}")
+    print(f"{'Total bytes:':<40} {total_bytes / 1024 / 1024 / 1024:<15.2f} GB")
     print("-" * 100)
 
 
