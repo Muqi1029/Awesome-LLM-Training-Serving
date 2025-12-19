@@ -76,7 +76,7 @@ def http_request(args):
         elif args.input_ids_path:
             with open(args.input_ids_path, mode="r", encoding="utf-8") as f:
                 input_ids = json.load(f)
-            from transformers import AutoTokenier
+            from transformers import AutoTokenizer
 
             assert (
                 args.tokenizer_path
@@ -101,6 +101,7 @@ def http_request(args):
                 f"\033[41m Request Error, Status Code={res.status_code}, Reason: {res.text} \033[0m"
             )
     else:
+        payload["stream"] = True
         res = requests.post(
             url=url,
             headers=headers,
@@ -108,8 +109,10 @@ def http_request(args):
             stream=True,
         )
         for line in res.iter_lines():
-            if line:
-                decoded_line = line.decode("utf-8")
+            if not line:
+                continue
+            decoded_line = line.decode("utf-8")
+
             if decoded_line.startswith("data: "):
                 data_str = decoded_line[6:]
                 if data_str.strip() == "[DONE]":
@@ -199,15 +202,15 @@ if __name__ == "__main__":
 
     mutex_group = parser.add_mutually_exclusive_group()
     mutex_group.add_argument(
-        "--ebnf", type="store_true", help="Constrained Decoding for EBNF format"
+        "--ebnf", action="store_true", help="Constrained Decoding for EBNF format"
     )
-    mutex_group.add_argument("--tool", action="store_true", help="Add tool")
+    mutex_group.add_argument("--tools", action="store_true", help="Add tool")
     mutex_group.add_argument("--msg-path", type=str, help="The path of messages")
     mutex_group.add_argument("--payload-path", type=str, help="The path of payload")
     mutex_group.add_argument("--input-ids-path", type=str, help="The path of input_ids")
 
     args = parser.parse_args()
     if args.backend == "http":
-        http_request()
+        http_request(args)
     else:
-        openai_request()
+        openai_request(args)
