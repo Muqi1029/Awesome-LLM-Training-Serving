@@ -1,5 +1,6 @@
 import argparse
 import json
+from pprint import pprint
 
 import openai
 import requests
@@ -60,8 +61,11 @@ def http_request(args):
 
     # construct payload
     payload = {}
+    if args.disable_separate_reasoning:
+        payload["separate_reasoning"] = False
+
     if not args.msg_path and not args.input_ids_path and not args.payload_path:
-        payload = {"messages": [{"role": "user", "content": args.user_content}]}
+        payload["messages"] = [{"role": "user", "content": args.user_content}]
         if args.ebnf:
             payload["ebnf"] = ebnf_content
         elif args.tools:
@@ -93,6 +97,7 @@ def http_request(args):
             headers=headers,
             json=payload,
         )
+        pprint(f"{payload=}")
         try:
             res.raise_for_status()
             print(res.json())
@@ -199,6 +204,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("--user-content", type=str, default="Who are you")
     parser.add_argument("--tokenizer-path", type=str, help="The path of tokenizer path")
+
+    parser.add_argument(
+        "--disable-separate-reasoning",
+        action="store_true",
+        help="Whether to separate reasoning",
+    )
 
     mutex_group = parser.add_mutually_exclusive_group()
     mutex_group.add_argument(
