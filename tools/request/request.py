@@ -55,6 +55,12 @@ country ::= "England" | "France" | "Germany" | "Italy"
 # """
 
 
+def info_print(payload, url):
+    print("=" * 80)
+    print(f"Sending to {url=}")
+    pprint(f"{payload=}")
+
+
 def http_request(args):
     url = f"{args.base_url}/v1/chat/completions"
     headers = {"Authorization": f"Bearer {args.api_key}"}
@@ -65,6 +71,7 @@ def http_request(args):
         payload["separate_reasoning"] = False
 
     if not args.msg_path and not args.input_ids_path and not args.payload_path:
+        # if there is no msg path, input_ids path, payload path
         payload["messages"] = [{"role": "user", "content": args.user_content}]
         if args.ebnf:
             payload["ebnf"] = ebnf_content
@@ -72,12 +79,15 @@ def http_request(args):
             payload["tools"] = tools
     else:
         if args.msg_path:
+            # read message path
             with open(args.msg_path, mode="r", encoding="utf-8") as f:
                 payload["messages"] = json.load(f)
         elif args.payload_path:
+            # read payload path
             with open(args.payload_path, mode="r", encoding="utf-8") as f:
                 payload = json.load(f)
         elif args.input_ids_path:
+            # read input_ids path
             with open(args.input_ids_path, mode="r", encoding="utf-8") as f:
                 input_ids = json.load(f)
             from transformers import AutoTokenizer
@@ -92,12 +102,12 @@ def http_request(args):
             url = f"{args.base_url}/v1/completions"
 
     if args.disable_stream:
+        info_print(payload, url)
         res = requests.post(
             url,
             headers=headers,
             json=payload,
         )
-        pprint(f"{payload=}")
         try:
             res.raise_for_status()
             print(res.json())
@@ -107,6 +117,7 @@ def http_request(args):
             )
     else:
         payload["stream"] = True
+        info_print(payload, url)
         res = requests.post(
             url=url,
             headers=headers,
