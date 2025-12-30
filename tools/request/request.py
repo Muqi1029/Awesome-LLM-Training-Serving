@@ -219,6 +219,7 @@ if __name__ == "__main__":
     parser.add_argument("--user-content", type=str, default="Who are you")
     parser.add_argument("--tokenizer-path", type=str, help="The path of tokenizer path")
 
+    # extra kwargs in the payload
     parser.add_argument(
         "--enable-thinking",
         action="store_true",
