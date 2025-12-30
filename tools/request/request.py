@@ -70,6 +70,9 @@ def http_request(args):
     if args.disable_separate_reasoning:
         payload["separate_reasoning"] = False
 
+    if args.enable_thinking:
+        payload["chat_template_kwargs"] = {"thinking": True}
+
     if not args.msg_path and not args.input_ids_path and not args.payload_path:
         # if there is no msg path, input_ids path, payload path
         payload["messages"] = [{"role": "user", "content": args.user_content}]
@@ -216,6 +219,11 @@ if __name__ == "__main__":
     parser.add_argument("--user-content", type=str, default="Who are you")
     parser.add_argument("--tokenizer-path", type=str, help="The path of tokenizer path")
 
+    parser.add_argument(
+        "--enable-thinking",
+        action="store_true",
+        help="Whether to enable reasoning",
+    )
     parser.add_argument(
         "--disable-separate-reasoning",
         action="store_true",
