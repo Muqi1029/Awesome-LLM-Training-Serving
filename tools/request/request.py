@@ -61,17 +61,17 @@ def info_print(payload, url):
     pprint(f"{payload=}")
 
 
+def read_json(filepath: str):
+    with open(filepath, mode="r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def http_request(args):
     url = f"{args.base_url}/v1/chat/completions"
     headers = {"Authorization": f"Bearer {args.api_key}"}
 
     # construct payload
     payload = {}
-    if args.disable_separate_reasoning:
-        payload["separate_reasoning"] = False
-
-    if args.enable_thinking:
-        payload["chat_template_kwargs"] = {"thinking": True}
 
     if not args.msg_path and not args.input_ids_path and not args.payload_path:
         # if there is no msg path, input_ids path, payload path
@@ -80,32 +80,41 @@ def http_request(args):
             payload["ebnf"] = ebnf_content
         elif args.tools:
             payload["tools"] = tools
+            payload["tool_choice"] = "required"
     else:
         if args.msg_path:
             # read message path
-            with open(args.msg_path, mode="r", encoding="utf-8") as f:
-                payload["messages"] = json.load(f)
+            payload["messages"] = read_json(args.msg_path)
         elif args.payload_path:
             # read payload path
-            with open(args.payload_path, mode="r", encoding="utf-8") as f:
-                payload = json.load(f)
+            payload["payload_path"] = read_json(args.payload_path)
         elif args.input_ids_path:
             # read input_ids path
-            with open(args.input_ids_path, mode="r", encoding="utf-8") as f:
-                input_ids = json.load(f)
+            input_ids = read_json(args.input_ids_path)
+
             from transformers import AutoTokenizer
 
             assert (
                 args.tokenizer_path
-            ), f"tokenizer_path must be provided in the input-ids-path"
+            ), f"tokenizer_path must be provided in the input-ids-path, use --tokenizer-path <TOKENIZER PATH>"
             tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_path)
             prompt = tokenizer.decode(input_ids)
             print(f"{prompt=}")
+
+            # use v1/completions api since it is already applied chat template
             payload["prompt"] = prompt
             url = f"{args.base_url}/v1/completions"
 
+    # special field setting
+    if args.model:
+        payload["model"] = args.model
+    if args.disable_separate_reasoning:
+        payload["separate_reasoning"] = False
+    if args.enable_thinking:
+        payload["chat_template_kwargs"] = {"thinking": True}
+
+    info_print(payload, url)
     if args.disable_stream:
-        info_print(payload, url)
         res = requests.post(
             url,
             headers=headers,
@@ -120,45 +129,57 @@ def http_request(args):
             )
     else:
         payload["stream"] = True
-        info_print(payload, url)
         res = requests.post(
             url=url,
             headers=headers,
             json=payload,
             stream=True,
         )
-        for line in res.iter_lines():
-            if not line:
-                continue
-            decoded_line = line.decode("utf-8")
-
-            if decoded_line.startswith("data: "):
-                data_str = decoded_line[6:]
-                if data_str.strip() == "[DONE]":
-                    print("\n[DONE]")
-                    break
-
-                try:
-                    chunk = json.loads(data_str)
-
-                    if "choices" in chunk and len(chunk["choices"]) > 0:
-                        delta = chunk["choices"][0].get("delta", {})
-                        if reasoning_content := delta.get("reasoning_content", ""):
-                            print(reasoning_content, end="", flush=True)
-
-                        if content := delta.get("content", ""):
-                            print(content, end="", flush=True)
-
-                        if tool_calls := delta.get("tool_calls", ""):
-                            tc = tool_calls[0]
-                            if func_name := tc.get("function", {}).get("name"):
-                                print(f"\n\n[Tool Call Detected]: Function={func_name}")
-                                print("Arguments: ", end="", flush=True)
-                            if func_arg := tc.get("function", {}).get("arguments"):
-                                print(func_arg, end="", flush=True)
-
-                except json.JSONDecodeError:
+        try:
+            res.raise_for_status()
+            for line in res.iter_lines():
+                if not line:
                     continue
+                decoded_line = line.decode("utf-8")
+
+                if args.raw:
+                    print(decoded_line)
+                    continue
+
+                if decoded_line.startswith("data: "):
+                    data_str = decoded_line[6:]
+                    if data_str.strip() == "[DONE]":
+                        print("\n[DONE]")
+                        break
+
+                    try:
+                        chunk = json.loads(data_str)
+
+                        if "choices" in chunk and len(chunk["choices"]) > 0:
+                            delta = chunk["choices"][0].get("delta", {})
+                            if reasoning_content := delta.get("reasoning_content", ""):
+                                print(reasoning_content, end="", flush=True)
+
+                            if content := delta.get("content", ""):
+                                print(content, end="", flush=True)
+
+                            if tool_calls := delta.get("tool_calls", ""):
+                                tc = tool_calls[0]
+                                if func_name := tc.get("function", {}).get("name"):
+                                    print(
+                                        f"\n\n[Tool Call Detected]: Function={func_name}"
+                                    )
+                                    print("Arguments: ", end="", flush=True)
+                                if func_arg := tc.get("function", {}).get("arguments"):
+                                    print(func_arg, end="", flush=True)
+
+                    except json.JSONDecodeError:
+                        continue
+
+        except Exception:
+            print(
+                f"\033[41m Request Error, Status Code={res.status_code}, Reason: {res.text} \033[0m"
+            )
 
 
 def openai_request(args):
@@ -212,6 +233,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("")
     parser.add_argument("--base-url", type=str, default="http://localhost:8888")
     parser.add_argument("--api-key", type=str, default="JustKeepMe")
+    parser.add_argument("--model")
+
     parser.add_argument("--disable-stream", action="store_true")
     parser.add_argument(
         "--backend", type=str, default="http", choices=["http", "openai"]
@@ -229,6 +252,10 @@ if __name__ == "__main__":
         "--disable-separate-reasoning",
         action="store_true",
         help="Whether to separate reasoning",
+    )
+
+    parser.add_argument(
+        "--raw", action="store_true", help="Whether to print raw sse content"
     )
 
     mutex_group = parser.add_mutually_exclusive_group()
