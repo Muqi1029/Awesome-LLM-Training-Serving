@@ -87,7 +87,7 @@ def http_request(args):
             payload["messages"] = read_json(args.msg_path)
         elif args.payload_path:
             # read payload path
-            payload["payload_path"] = read_json(args.payload_path)
+            payload = read_json(args.payload_path)
         elif args.input_ids_path:
             # read input_ids path
             input_ids = read_json(args.input_ids_path)
