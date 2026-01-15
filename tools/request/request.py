@@ -1,5 +1,6 @@
 import argparse
 import json
+from pathlib import Path
 from pprint import pprint
 
 import openai
@@ -62,6 +63,8 @@ def info_print(payload, url):
 
 
 def read_json(filepath: str):
+    if not Path(filepath).exists():
+        raise ValueError(f"{filepath} doesn't exist!")
     with open(filepath, mode="r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -233,7 +236,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("")
     parser.add_argument("--base-url", type=str, default="http://localhost:8888")
     parser.add_argument("--api-key", type=str, default="JustKeepMe")
-    parser.add_argument("--model")
+    parser.add_argument(
+        "--model", type=str, help="override the model field in the payload"
+    )
 
     parser.add_argument("--disable-stream", action="store_true")
     parser.add_argument(
