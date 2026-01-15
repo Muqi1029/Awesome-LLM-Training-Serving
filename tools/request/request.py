@@ -114,7 +114,8 @@ def http_request(args):
     if args.disable_separate_reasoning:
         payload["separate_reasoning"] = False
     if args.enable_thinking:
-        payload["chat_template_kwargs"] = {"thinking": True}
+        payload["chat_template_kwargs"] = {"thinking": True, "enable_thinking": True}
+        payload["enable_thinking"] = True
 
     info_print(payload, url)
     if args.disable_stream:
