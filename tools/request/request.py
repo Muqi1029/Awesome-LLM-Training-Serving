@@ -1,3 +1,8 @@
+"""
+1. Send a "who are you" Request: python request.py --base-url <default: http://127.0.0.1:8888> --api-key <default: JustKeepMe> --backend <default: http>
+2. Send a payload Requests: python requests.py --payload-path <path of payload>
+"""
+
 import argparse
 import json
 from pathlib import Path
