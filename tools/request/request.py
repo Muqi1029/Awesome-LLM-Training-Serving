@@ -88,7 +88,7 @@ def color_print(text: str, color: Color):
         Color.LIGHT_CYAN: "\033[96m",
         Color.LIGHT_GREEN: "\033[92m",
         Color.LIGHT_YELLOW: "\033[93m",
-        Color.RED: "\033[42m",
+        Color.RED: "\033[41m",
     }
 
     try:
@@ -113,7 +113,7 @@ def http_request(args):
             payload["ebnf"] = ebnf_content
         elif args.tools:
             payload["tools"] = tools
-            payload["tool_choice"] = "required"
+            # payload["tool_choice"] = "required"
     else:
         if args.msg_path:
             # read message path
