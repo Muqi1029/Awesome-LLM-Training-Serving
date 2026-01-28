@@ -88,6 +88,7 @@ def color_print(text: str, color: Color):
         Color.LIGHT_CYAN: "\033[96m",
         Color.LIGHT_GREEN: "\033[92m",
         Color.LIGHT_YELLOW: "\033[93m",
+        Color.RED: "\033[42m",
     }
 
     try:
@@ -160,7 +161,9 @@ def http_request(args):
         )
         try:
             res.raise_for_status()
-            print(res.json())
+            color_print(
+                json.dumps(res.json(), indent=2, ensure_ascii=False), Color.LIGHT_GREEN
+            )
         except Exception as e:
             color_print(
                 f"Request Error, Status Code={res.status_code}, Reason: {res.text} Error: {e}",
