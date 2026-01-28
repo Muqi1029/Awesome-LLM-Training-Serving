@@ -5,8 +5,8 @@
 
 import argparse
 import json
+from enum import Enum, auto
 from pathlib import Path
-from pprint import pprint
 
 import openai
 import requests
@@ -40,6 +40,14 @@ tool_select_name = {
 
 tools = [tool_select_name]
 
+
+class Color(Enum):
+    LIGHT_CYAN = auto()
+    LIGHT_GREEN = auto()
+    LIGHT_YELLOW = auto()
+    RED = auto()
+
+
 ebnf_content = """
 root ::= city | description
 
@@ -64,7 +72,7 @@ country ::= "England" | "France" | "Germany" | "Italy"
 def info_print(payload, url):
     print("=" * 80)
     print(f"Sending to {url=}")
-    pprint(f"{payload=}")
+    print(f"payload={json.dumps(payload, indent=2, ensure_ascii=False)}")
 
 
 def read_json(filepath: str):
@@ -72,6 +80,22 @@ def read_json(filepath: str):
         raise ValueError(f"{filepath} doesn't exist!")
     with open(filepath, mode="r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def color_print(text: str, color: Color):
+    RESET_CODE = "\033[0m"
+    COLOR_TO_ANSI = {
+        Color.LIGHT_CYAN: "\033[96m",
+        Color.LIGHT_GREEN: "\033[92m",
+        Color.LIGHT_YELLOW: "\033[93m",
+    }
+
+    try:
+        color_code = COLOR_TO_ANSI[color]
+    except KeyError:
+        raise NotImplementedError(f"{color} is not supported yet.")
+
+    print(f"{color_code}{text}{RESET_CODE}", end="", flush=True)
 
 
 def http_request(args):
@@ -119,7 +143,12 @@ def http_request(args):
     if args.disable_separate_reasoning:
         payload["separate_reasoning"] = False
     if args.enable_thinking:
-        payload["chat_template_kwargs"] = {"thinking": True, "enable_thinking": True}
+        # for compatibility of different platforms
+        payload["chat_template_kwargs"] = {
+            "thinking": True,
+            "enable_thinking": True,
+            "enforce_think": True,
+        }
         payload["enable_thinking"] = True
 
     info_print(payload, url)
@@ -132,9 +161,10 @@ def http_request(args):
         try:
             res.raise_for_status()
             print(res.json())
-        except Exception:
-            print(
-                f"\033[41m Request Error, Status Code={res.status_code}, Reason: {res.text} \033[0m"
+        except Exception as e:
+            color_print(
+                f"Request Error, Status Code={res.status_code}, Reason: {res.text} Error: {e}",
+                Color.RED,
             )
     else:
         payload["stream"] = True
@@ -167,27 +197,28 @@ def http_request(args):
                         if "choices" in chunk and len(chunk["choices"]) > 0:
                             delta = chunk["choices"][0].get("delta", {})
                             if reasoning_content := delta.get("reasoning_content", ""):
-                                print(reasoning_content, end="", flush=True)
+                                color_print(reasoning_content, Color.LIGHT_CYAN)
 
                             if content := delta.get("content", ""):
-                                print(content, end="", flush=True)
+                                color_print(content, Color.LIGHT_GREEN)
 
                             if tool_calls := delta.get("tool_calls", ""):
                                 tc = tool_calls[0]
                                 if func_name := tc.get("function", {}).get("name"):
-                                    print(
-                                        f"\n\n[Tool Call Detected]: Function={func_name}"
+                                    color_print(
+                                        f"\n\n[Tool Call Detected]: Function={func_name}\nArgument:",
+                                        Color.LIGHT_YELLOW,
                                     )
-                                    print("Arguments: ", end="", flush=True)
                                 if func_arg := tc.get("function", {}).get("arguments"):
-                                    print(func_arg, end="", flush=True)
+                                    color_print(func_arg, Color.LIGHT_YELLOW)
 
                     except json.JSONDecodeError:
                         continue
 
-        except Exception:
-            print(
-                f"\033[41m Request Error, Status Code={res.status_code}, Reason: {res.text} \033[0m"
+        except Exception as e:
+            color_print(
+                f"Request Error, Status Code={res.status_code}, Reason: {res.text} Error: {e}",
+                Color.RED,
             )
 
 
