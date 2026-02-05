@@ -1,4 +1,4 @@
-# script: torchrun --nproc_per_node=#{world_size} group_list.py
+# single node script: torchrun --nproc_per_node=#{world_size} group_list.py
 import argparse
 import os
 from typing import Dict, List
@@ -14,13 +14,19 @@ def _register_group(name: str, group: dist.ProcessGroup):
     _groups[name] = group
 
 
-def main(group_ranks: List[List[int]], backend, device):
+def main(group_ranks: List[List[int]], backend):
     # Initialize the default process group
-    dist.init_process_group(backend=backend)
+    if "LOCAL_RANK" not in os.environ:
+        print("Wait, are you running this with torchrun?")
+        local_rank = 0
+    else:
+        local_rank = int(os.environ["LOCAL_RANK"])
+    device = torch.device(f"cuda:{local_rank}")
+    torch.cuda.set_device(device)
+    dist.init_process_group(backend=backend, device_id=device)
 
     try:
         rank = dist.get_rank()  # global rank
-        local_rank = int(os.environ["LOCAL_RANK"])  # local rank
 
         # Create and register process groups
         for i, ranks in enumerate(group_ranks):
@@ -30,17 +36,18 @@ def main(group_ranks: List[List[int]], backend, device):
                 _register_group(group_name, device_group)
 
                 if rank in ranks:
-                    world_size = len(ranks)
+                    world_size_in_group = len(ranks)
                     rank_in_group = ranks.index(rank)
                     print(
-                        f"{local_rank=}, {rank=}, group={i}, {world_size=}, {rank_in_group=}"
+                        f"{local_rank=}, {rank=}, group={i}, {world_size_in_group=}, {rank_in_group=}"
                     )
 
                     # Perform all_gather operation within the group
-                    data = torch.tensor([rank], dtype=torch.int64, device=device)
+                    data = torch.tensor([rank], dtype=torch.int64, device="cuda")
                     # Use empty instead of zeros for better performance
                     tensor_list = [
-                        torch.empty_like(data, device=device) for _ in range(world_size)
+                        torch.empty_like(data, device="cuda")
+                        for _ in range(world_size_in_group)
                     ]
 
                     dist.all_gather(tensor_list, data, group=device_group)
@@ -49,7 +56,9 @@ def main(group_ranks: List[List[int]], backend, device):
                     dist.barrier(group=device_group)
 
                     if rank_in_group == 0:
-                        print(f"gather result of {group_name}: {tensor_list}")
+                        print(
+                            f"\n[Result] gather result of {group_name}: {tensor_list}"
+                        )
             except RuntimeError as e:
                 print(f"Error in group {i}: {e}")
     finally:
@@ -69,18 +78,9 @@ if __name__ == "__main__":
     if args.use_gpu:
         if not torch.cuda.is_available():
             raise ValueError("GPU is not available, please use CPU!")
-
-        local_rank = int(os.environ["LOCAL_RANK"])
-        torch.cuda.set_device(local_rank)
-
-        device = torch.device("cuda")
         backend = "nccl"
     else:
-        device = torch.device("cpu")
         backend = "gloo"
 
     group_ranks = [[0, 1, 2], [3, 4]]
-    # in this case, we need to run the script with 5 processes
-    # script: torchrun --nproc_per_node=5 group_list.py [--use-gpu]
-
-    main(group_ranks, backend, device)
+    main(group_ranks, backend)
