@@ -24,10 +24,13 @@ def download_from_hub(model_path, cache_dir=None):
 
     weight_files = glob(f"{dir_path}/*.safetensors")
     weight_files.sort()
+    if args.max_checkpoints != -1:
+        weight_files = weight_files[: args.max_checkpoints]
 
     for path in weight_files:
         print(f"\n🔍 Loading weights from: {path}")
         state_dict = load_file(path)
+        # state_dict = safe_open(path, framework="pt", device="cpu")
 
         # Calculate total parameters
         num_params = sum(p.numel() for p in state_dict.values())
@@ -61,6 +64,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-path", type=str, required=True)
     parser.add_argument("--cache-dir", type=str, default=None)
+    parser.add_argument("--max-checkpoints", type=int, default=-1)
     return parser.parse_args()
 
 
