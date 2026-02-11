@@ -113,7 +113,7 @@ def http_request(args):
             payload["ebnf"] = ebnf_content
         elif args.tools:
             payload["tools"] = tools
-            # payload["tool_choice"] = "required"
+            payload["tool_choice"] = "required"
     else:
         if args.msg_path:
             # read message path
@@ -150,10 +150,17 @@ def http_request(args):
             "enable_thinking": True,
             "enforce_think": True,
         }
-        payload["enable_thinking"] = True
+    elif args.disable_thinking:
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
 
+    if not args.disable_stream and args.enable_stream_usage:
+        payload["stream_options"] = {
+            "include_usage": True,
+            "continuous_usage_stats": True,
+        }
     info_print(payload, url)
     if args.disable_stream:
+        payload["stream"] = False
         res = requests.post(
             url,
             headers=headers,
@@ -280,6 +287,7 @@ if __name__ == "__main__":
         "--model", type=str, help="override the model field in the payload"
     )
 
+    parser.add_argument("--enable-stream-usage", action="store_true")
     parser.add_argument("--disable-stream", action="store_true")
     parser.add_argument(
         "--backend", type=str, default="http", choices=["http", "openai"]
@@ -288,11 +296,18 @@ if __name__ == "__main__":
     parser.add_argument("--tokenizer-path", type=str, help="The path of tokenizer path")
 
     # extra kwargs in the payload
-    parser.add_argument(
+    think_mutex_group = parser.add_mutually_exclusive_group()
+    think_mutex_group.add_argument(
         "--enable-thinking",
         action="store_true",
         help="Whether to enable reasoning",
     )
+    think_mutex_group.add_argument(
+        "--disable-thinking",
+        action="store_true",
+        help="Whether to disable reasoning",
+    )
+
     parser.add_argument(
         "--disable-separate-reasoning",
         action="store_true",
