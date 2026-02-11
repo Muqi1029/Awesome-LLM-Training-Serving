@@ -6,6 +6,7 @@ import tempfile
 import fastapi
 import psutil
 import uvicorn
+from fastapi.responses import JSONResponse
 from starlette.routing import Mount
 
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +22,7 @@ def lifespan(app):
 app = fastapi.FastAPI(lifespan=lifespan)
 
 requests_counter = None
+requests_counter_py = 0
 cpu_usaga_gauge = None
 
 
@@ -36,12 +38,24 @@ def create_metrics_recorders():
 
 
 @app.get("/")
-async def entrypoint():
+async def entrypoint() -> JSONResponse:
+    global requests_counter_py
     assert requests_counter is not None and cpu_usaga_gauge is not None
     requests_counter.labels(model="demo_model").inc()
+    requests_counter_py += 1
     cpu_percent = psutil.cpu_percent(interval=None)
     cpu_usaga_gauge.set(cpu_percent)
     return {"msg": "Hello, World", "cpu_percent": cpu_percent}
+
+
+@app.get("/json_metrics")
+async def export_json_metrics() -> JSONResponse:
+    cpu_percent = psutil.cpu_percent(interval=None)
+    cpu_usaga_gauge.set(cpu_percent)
+    return {
+        "requests_counter": requests_counter_py,
+        "cpu_usage": cpu_percent,
+    }
 
 
 prometheus_multiproc_dir = tempfile.TemporaryDirectory()
