@@ -13,9 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 def lifespan(app):
-    print("APP START UP")
+    logger.info("APP START UP")
     yield
-    print("APP SHUTDOWN")
+    logger.info("APP SHUTDOWN")
 
 
 app = fastapi.FastAPI(lifespan=lifespan)
