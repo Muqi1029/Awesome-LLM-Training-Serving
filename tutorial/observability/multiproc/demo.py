@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import tempfile
+from contextlib import asynccontextmanager
 
 import fastapi
 import psutil
@@ -13,7 +14,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def lifespan(app):
+@asynccontextmanager
+async def lifespan(app):
     logger.info("APP START UP")
     yield
     logger.info("APP SHUTDOWN")
