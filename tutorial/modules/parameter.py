@@ -4,6 +4,12 @@ import torch
 from torch import nn
 
 
+class SubModule(nn.Module):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__()
+        self.layer = nn.Parameter(torch.randn(2, 3))
+
+
 class TestModule(nn.Module):
     def __init__(self):
         super().__init__()
@@ -16,6 +22,8 @@ class TestModule(nn.Module):
             "register_param", nn.Parameter(torch.randn(20, 3))
         )  # = self.register_param = nn.Parameter(torch.randn(20, 3))
         self.register_buffer("buffer", self.unlearnable_param)
+
+        self.sub = SubModule()
 
     def forward(self, x):
         x = self.layer1(x)
