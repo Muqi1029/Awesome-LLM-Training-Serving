@@ -1,7 +1,12 @@
+import sys
+
 import torch
 import triton
 import triton.language as tl
 
+if not torch.cuda.is_available():
+    print("This test works only in CUDA environment")
+    sys.exit(1)
 DEVICE = "cuda"
 
 
@@ -80,10 +85,13 @@ def check_correctness():
     output_triton = add(x, y)
     print(output_torch)
     print(output_triton)
-    print(
-        f"The maximum difference between torch and triton is "
-        f"{torch.max(torch.abs(output_torch - output_triton))}"
-    )
+    diff = torch.max(torch.abs(output_torch - output_triton))
+    print(f"The maximum difference between torch and triton is {diff}")
+    if diff == 0:
+        print("Correctness Test Passed")
+    else:
+        print("Correctness Test Failed")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
