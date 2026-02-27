@@ -8,7 +8,7 @@ def get_cores_per_sm(major, minor):
     """
     cc = (major, minor)
 
-    cores_dict = {(8, 9): (128, 4), (9, 0): (128, 4)}  # RTX40, L40
+    cores_dict = {(8, 9): (128, 4), (9, 0): (128, 4), (12, 0): (128, 4)}
     assert cc in cores_dict
 
     return cores_dict[cc]
