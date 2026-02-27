@@ -1,55 +1,6 @@
 import torch
 from triton.runtime import driver
 
-# get device properties
-DEVICE = driver.active.get_active_torch_device()
-properties = driver.active.utils.get_device_properties(DEVICE.index)
-torch_prop = torch.cuda.get_device_properties(DEVICE.index)
-
-# extract core parameters
-NUM_SM = properties["multiprocessor_count"]
-NUM_REGS_PER_SM = properties["max_num_regs"]
-SIZE_SMEM_PER_SM = properties["max_shared_mem"]
-WARP_SIZE = properties["warpSize"]
-L2_CACHE = torch_prop.L2_cache_size
-
-# compute metrics
-total_regs_mb = (NUM_REGS_PER_SM * NUM_SM * 4) / 1024 / 1024  # 4 bytes per register
-total_smem_kb = (SIZE_SMEM_PER_SM * NUM_SM) / 1024
-# 计算理论显存带宽 (GB/s)
-# 频率单位通常是 kHz，位宽是 bit。公式: 频率 * 2 (DDR) * 位宽 / 8 / 1e6
-bw_gb_s = properties["mem_clock_rate"] * 2 * (properties["mem_bus_width"] / 8) / 1e6
-
-print("=" * 50)
-print(f"🚀 GPU Hardware Profile: {torch_prop.name}")
-print(f"📍 Compute Capability:  {torch_prop.major}.{torch_prop.minor}")
-print("=" * 50)
-
-print(f"⚙️ Compute Resources:")
-print(f"  • Streaming Multiprocessors (SMs) : {NUM_SM}")
-print(
-    f"  • Clock Rate                    : {properties['sm_clock_rate'] / 1e3:.2f} MHz"
-)
-print(f"  • Warp Size                     : {WARP_SIZE} threads")
-print(f"  • Total Registers (Global)      : {total_regs_mb:.2f} MB")
-
-print(f"\n🧠 Memory Hierarchy:")
-print(
-    f"  • Registers (per SM)            : {NUM_REGS_PER_SM * 4 / 1024:.2f} KB ({NUM_REGS_PER_SM} regs)"
-)
-print(f"  • Shared Memory (per SM)        : {SIZE_SMEM_PER_SM / 1024:.2f} KB")
-print(f"  • L2 Cache Size                 : {L2_CACHE / 1024 / 1024:.2f} MB")
-print(f"  • VRAM Total Capacity           : {torch_prop.total_memory / 1024**3:.2f} GB")
-
-print(f"\n⚡ Throughput:")
-print(f"  • Memory Bus Width              : {properties['mem_bus_width']} bit")
-print(f"  • Max Memory Bandwidth          : {bw_gb_s:.2f} GB/s")
-print("=" * 50)
-
-
-import torch
-from triton.runtime import driver
-
 
 def get_cores_per_sm(major, minor):
     """
