@@ -1,6 +1,4 @@
 """
-Run few-shot GSM-8K evaluation.
-
 Usage:
 python fp8_kernel.py --N 8192 --K 2048 --config-path configs/config.json
 """
