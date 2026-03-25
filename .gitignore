@@ -180,3 +180,4 @@ checkpoints/
 
 *.engine
 *.ncu-rep
+*.nsys-rep
