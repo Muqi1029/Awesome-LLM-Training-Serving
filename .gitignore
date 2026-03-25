@@ -177,3 +177,6 @@ outputs/
 
 .vscode
 checkpoints/
+
+*.engine
+*.ncu-rep
