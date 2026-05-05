@@ -18,9 +18,9 @@ if [[ -z "${MODEL_TYPE}" ]]; then
 
     NUM_WEIGHTS=${NUM_WEIGHTS%B}
 
-    if [[ $((NUM_WEIGHTS > 300)) == 1 ]]; then
+    if ((NUM_WEIGHTS > 300)); then
         TP=8
-    elif [[ $((NUM_WEIGHTS >= 30)) == 1 ]]; then
+    elif [[ $((NUM_WEIGHTS)) -gt 30 ]]; then
         TP=2
     fi
 fi
