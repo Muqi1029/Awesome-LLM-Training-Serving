@@ -5,25 +5,24 @@ set -exo pipefail
 # args
 MODEL_PATH=${MODEL_PATH:-${QWEN3_06B}}
 PORT=${PORT:-8888}
-
 DISABLE_LOG=${DISABLE_LOG:-0}
 DISABLE_FP8_KVCACHE=${DISABLE_FP8_KVCACHE:-0}
-
-TP=${TP:-1}
 
 # defer mode type
 if [[ -z "${MODEL_TYPE}" ]]; then
     MODEL_NAME=$(basename $(dirname ${MODEL_PATH}))
     IFS='-' read -r MODEL_TYPE NUM_WEIGHTS _ <<< "$MODEL_NAME"
 
-    NUM_WEIGHTS=${NUM_WEIGHTS%B}
+    NUM_WEIGHTS="${NUM_WEIGHTS%B}"
 
-    if ((NUM_WEIGHTS > 300)); then
+    if awk "BEGIN{exit !($NUM_WEIGHTS > 300)}"; then
         TP=8
-    elif [[ $((NUM_WEIGHTS)) -gt 30 ]]; then
+    elif awk "BEGIN{exit !($NUM_WEIGHTS > 30)}"; then
         TP=2
     fi
 fi
+
+TP=${TP:-1} # tp arg is the highest priority
 
 SERVER_LAUNCH="sglang serve \
     --model-path ${MODEL_PATH} \
