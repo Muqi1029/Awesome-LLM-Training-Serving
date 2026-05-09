@@ -15,7 +15,7 @@ port = 8888
 host = "0.0.0.0"
 base_url = f"http://{host}:{port}/v1"
 api_key = "just keep me"
-model_path = os.environ.get("QWEN3235BA22BFP8", "")
+model_path = os.environ.get("QWEN3_235BA22B_FP8", "")
 
 
 def prepare_prompt(tokenizer, input_len):
