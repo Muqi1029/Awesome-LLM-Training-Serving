@@ -1,4 +1,4 @@
-![image.png](../../../assets/sglang.png)
+![image.png](../../assets/sglang.png)
 
 # Entrypoint
 
