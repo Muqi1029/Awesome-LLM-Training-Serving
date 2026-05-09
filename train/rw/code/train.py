@@ -1,9 +1,8 @@
 import yaml
-from torch.optim import AdamW
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
 from rw.code.loss import reward_model_loss
 from rw.code.prepare_data import get_dataloader
+from torch.optim import AdamW
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 
 def main():

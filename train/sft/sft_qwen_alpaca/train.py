@@ -3,10 +3,9 @@ from pprint import pprint
 
 import hydra
 from omegaconf import DictConfig
-from transformers import DataCollatorForSeq2Seq, Trainer, TrainingArguments
-
 from sft.code.prepare_data import AlpacaEvalDataset
 from sft.code.utils import load_model_and_tokenizer
+from transformers import DataCollatorForSeq2Seq, Trainer, TrainingArguments
 
 pprint(sys.argv)
 sys.argv.pop()
