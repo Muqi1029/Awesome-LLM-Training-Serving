@@ -8,3 +8,4 @@ find_package(CUDAToolkit REQUIRED)
 message(STATUS "Using CUDAToolkit VERSION: ${CUDAToolkit_VERSION}")
 
 add_subdirectory(cccl)
+add_subdirectory(runtime)
