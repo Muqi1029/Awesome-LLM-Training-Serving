@@ -49,7 +49,6 @@ case "$MODEL_TYPE" in
         ;;
     *)
         echo "Unknown MODEL_TYPE: ${MODEL_TYPE}" >&2
-        exit 1
         ;;
 esac
 
