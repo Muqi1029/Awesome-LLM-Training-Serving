@@ -2,8 +2,8 @@
 #include <stdio.h>
 
 inline int getMultiProcessorCount() {
-  int nSM{0};
-  int deviceID{0};
+  int nSM;
+  int deviceID;
   cudaGetDevice(&deviceID);
   // cudaSetDevice()
   cudaDeviceGetAttribute(&nSM, cudaDevAttrMultiProcessorCount, deviceID);
