@@ -1,19 +1,15 @@
-# Test Generate API
+# Test SEND APIs
 import os
 from argparse import ArgumentParser
 
 import requests
 from openai import OpenAI
-from transformers import AutoTokenizer
 
-model_path = os.environ["DEEPSEEK_R1_DISTILL_QWEN_7B"]
+model_path = os.environ("MODEL_PATH")
 base_url = os.environ["BASE_URL"]
-api_key = os.environ["API_KEY"]
+api_key = os.getenv("API_KEY", "JustKeepMe")
 
-client = OpenAI(
-    base_url=base_url,
-    api_key=os.environ.get("API_KEY", "Bearer JustKeepMe"),
-)
+client = OpenAI(base_url=base_url, api_key=api_key)
 
 
 def non_streaming_response(client: OpenAI):
@@ -58,8 +54,9 @@ def main(args):
     if args.api == "response":
         non_streaming_response(client)
     elif args.api == "generate":
-        tokenizer = AutoTokenizer.from_pretrained(model_path)
+        from transformers import AutoTokenizer
 
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
         messages = [{"role": "user", "content": "What is 1+3?"}]
         text = tokenizer.apply_chat_template(
             messages, add_generation_prompt=True, tokenize=False
