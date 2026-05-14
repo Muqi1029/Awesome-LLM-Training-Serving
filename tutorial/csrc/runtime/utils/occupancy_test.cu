@@ -10,17 +10,18 @@ __global__ void squareKernel(float *d_out, float *d_in, int N) {
   }
 }
 
-__global__ void squareKernel(float *d_out, float *d_in, int N) {
+__global__ void squareKernelBack(float *d_out, float *d_in, int N) {
+
   int index = blockIdx.x * blockDim.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
 
-  for (int i = index; i < N; i += stride) {
+  for (int i = index; i < N; ++i) {
     d_out[i] = d_in[i] * d_in[i];
   }
 }
 
 int main() {
-  int N = 1000000;
+  int N = 1000000000;
   int blockSize = 256;
 
   int deviceId;
