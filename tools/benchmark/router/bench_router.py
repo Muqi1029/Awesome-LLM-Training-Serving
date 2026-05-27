@@ -5,7 +5,9 @@ import json
 import logging
 import os
 import random
+import sys
 import time
+import traceback
 from argparse import ArgumentParser, Namespace
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -79,6 +81,41 @@ def normalize_payload(payload: Dict) -> None:
     """Align recorded SGLang request bodies with router/OpenAI expectations."""
     if payload.get("min_tokens") is not None and payload["min_tokens"] < 1:
         payload.pop("min_tokens")
+    for param in [
+        "cache_salt",
+        "bootstrap_port",
+        "stop_regex",
+        "routed_experts_start_len",
+        "session_params",
+        "encrypt_type",
+        "task",
+        "stream_reasoning",
+        "extra_key",
+        "return_routed_experts",
+        "no_stop_trim",
+        "bootstrap_room",
+        "priority",
+        "stop_token_ids",
+        "disagg_prefill_dp_rank",
+        "ebnf",
+        "return_hidden_states",
+        "continue_final_message",
+        "routed_dp_rank",
+        "rid",
+        "custom_logit_processor",
+        "data_parallel_rank",
+        "use_audio_in_video",
+        "lora_path",
+        "separate_reasoning",
+        "min_dynamic_patch",
+        "max_dynamic_patch",
+        "regex",
+        "bootstrap_host",
+        "custom_params",
+        "return_cached_tokens_details",
+    ]:
+        if param in payload:
+            payload.pop(param)
 
     response_format = payload.get("response_format")
     if not isinstance(response_format, dict):
@@ -111,26 +148,28 @@ async def request_func(
             most_recent_timestamp = st
             output = OutputMetric()
 
-            async with session.post(
-                url=args.base_url + "/v1/chat/completions",
-                json=payload,
-                headers={"Authorization": args.api_key},
-            ) as response:
-                if response.status == 200:
-                    async for chunk_bytes in response.content:
-                        chunk_bytes = chunk_bytes.strip()
-                        if not chunk_bytes:
-                            continue
+            try:
+                async with session.post(
+                    url=args.base_url + "/v1/chat/completions",
+                    json=payload,
+                    headers={"Authorization": args.api_key},
+                ) as response:
+                    if response.status == 200:
+                        async for chunk_bytes in response.content:
+                            chunk_bytes = chunk_bytes.strip()
+                            if not chunk_bytes:
+                                continue
 
-                        chunk = remove_prefix(chunk_bytes.decode("utf-8"), "data: ")
-                        latency_ms = (time.perf_counter() - st) * 1000
-                        if chunk == "[DONE]":
-                            pass
-                        else:
-                            data = json.loads(chunk)
-                            choices = data.get("choices") or []
-                            if not choices:
-                                # try to get last chunk containing usage info
+                            chunk = remove_prefix(chunk_bytes.decode("utf-8"), "data: ")
+                            latency_ms = (time.perf_counter() - st) * 1000
+                            if chunk == "[DONE]":
+                                pass
+                            else:
+                                data = json.loads(chunk)
+                                choices = data.get("choices") or []
+                                if not choices:
+                                    continue
+
                                 usage_data = data.get("usage") or {}
                                 if usage_data:
                                     output.prompt_tokens = usage_data.get(
@@ -142,32 +181,43 @@ async def request_func(
                                     output.cached_tokens = usage_data.get(
                                         "prompt_tokens_details", {}
                                     ).get("cached_tokens", 0)
-                                continue
 
-                            # Reasoning models stream thoughts via
-                            # `reasoning_content`; count them like content.
-                            delta = choices[0].get("delta") or {}
+                                # Reasoning models stream thoughts via
+                                # `reasoning_content`; count them like content.
+                                delta = choices[0].get("delta") or {}
 
-                            if delta.get("reasoning_content") or delta.get("content"):
-                                timestamp = time.perf_counter()
-                                # First token
-                                if ttft_ms == 0.0:
-                                    ttft_ms = (timestamp - st) * 1000
-                                    output.ttft_ms = ttft_ms
+                                if delta.get("reasoning_content") or delta.get(
+                                    "content"
+                                ):
+                                    timestamp = time.perf_counter()
+                                    # First token
+                                    if ttft_ms == 0.0:
+                                        ttft_ms = (timestamp - st) * 1000
+                                        output.ttft_ms = ttft_ms
 
-                                # Decoding phase
-                                else:
-                                    itl_ms = (timestamp - most_recent_timestamp) * 1000
-                                    output.itl_ms_list.append(itl_ms)
+                                    # Decoding phase
+                                    else:
+                                        itl_ms = (
+                                            timestamp - most_recent_timestamp
+                                        ) * 1000
+                                        output.itl_ms_list.append(itl_ms)
 
-                                most_recent_timestamp = timestamp
-                    output.latency_ms = latency_ms
-                    output.success = True
-                else:
-                    output.error_message = await response.text()
-                    print(output.error_message)
-                    output.success = False
-                    return output
+                                    most_recent_timestamp = timestamp
+                        output.latency_ms = latency_ms
+                        output.success = True
+                    else:
+                        output.error_message = await response.text()
+                        print(output.error_message)
+                        output.success = False
+                        return output
+            except Exception:
+                exc_info = sys.exc_info()
+                error_message = "".join(traceback.format_exception(*exc_info))
+                logger.error(error_message)
+                output.error_message = error_message
+                output.success = False
+                return output
+
     if pbar:
         pbar.update(1)
     return output
@@ -185,7 +235,9 @@ def handle_outputs(outputs: List[OutputMetric], duration_s: float):
     # filter failed requests
     filtered_outputs = filter_outputs(outputs)
     if len(filtered_outputs) != len(outputs):
-        logger.warning(f"{len(outputs)} requests failed")
+        num_failed_requests = len(outputs) - len(filtered_outputs)
+        if num_failed_requests > 0:
+            logger.warning(f"Failed requests: {num_failed_requests}")
 
     ttft_ms_list = [output.ttft_ms for output in filtered_outputs]
     latency_ms_list = [output.latency_ms for output in filtered_outputs]
@@ -280,7 +332,9 @@ def parse_args():
     parser.add_argument(
         "--max-concurrency", default=32, type=int, help="The max concurrency"
     )
-    parser.add_argument("--request-rate", default=32, type=int, help="Request rate")
+    parser.add_argument(
+        "--request-rate", default=float("inf"), type=float, help="Request rate"
+    )
 
     parser.add_argument(
         "--num-requests",
