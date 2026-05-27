@@ -222,18 +222,16 @@ async def run_benchmark(args):
     # read dataset
     requests = read_requests(args.requests_path)
 
+    if args.debug:
+        args.num_requests = 10
+        args.warmup_requests = 3
+        logger.info(f"Debug mode: only use {args.num_requests} benchmark requests")
+        logger.info(f"Debug mode: only use {args.warmup_requests} warmup requests")
+
     # prune
     if args.num_requests:
         requests = requests[: args.num_requests]
         logger.info(f"Pruned to {len(requests)} requests")
-
-    if args.debug:
-        requests = requests[:3]
-        logger.info(f"Debug mode: only use {len(requests)} requests")
-        for i, req in enumerate(requests):
-            logger.info(
-                f"Request {i}: model={req.get('model')}, messages={len(req.get('messages', []))}"
-            )
 
     sem = asyncio.Semaphore(args.max_concurrency)
 
