@@ -144,6 +144,7 @@ async def request_func(
     async with sem:
         async with _create_bench_client_session() as session:
             ttft_ms = 0.0
+            latency_ms = 0.0
             st = time.perf_counter()
             most_recent_timestamp = st
             output = OutputMetric()
