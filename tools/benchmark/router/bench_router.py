@@ -153,7 +153,7 @@ async def request_func(
                 async with session.post(
                     url=args.base_url + "/v1/chat/completions",
                     json=payload,
-                    headers={"Authorization": args.api_key},
+                    headers={"Authorization": "Bearer " + args.api_key},
                 ) as response:
                     if response.status == 200:
                         async for chunk_bytes in response.content:
