@@ -167,10 +167,6 @@ async def request_func(
                                 pass
                             else:
                                 data = json.loads(chunk)
-                                choices = data.get("choices") or []
-                                if not choices:
-                                    continue
-
                                 usage_data = data.get("usage") or {}
                                 if usage_data:
                                     output.prompt_tokens = usage_data.get(
@@ -179,9 +175,13 @@ async def request_func(
                                     output.completion_tokens = usage_data.get(
                                         "completion_tokens", 0
                                     )
-                                    output.cached_tokens = usage_data.get(
-                                        "prompt_tokens_details", {}
+                                    output.cached_tokens = (
+                                        usage_data.get("prompt_tokens_details") or {}
                                     ).get("cached_tokens", 0)
+
+                                choices = data.get("choices") or []
+                                if not choices:
+                                    continue
 
                                 # Reasoning models stream thoughts via
                                 # `reasoning_content`; count them like content.
