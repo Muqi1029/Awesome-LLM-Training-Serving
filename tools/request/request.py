@@ -12,13 +12,37 @@ from pathlib import Path
 import openai
 import requests
 
+json_schema_response_format = {
+    "name": "require_named",
+    "description": "a schema for the response format",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "the name",
+                "enum": ["Muqi Li", "Muqi1029"],
+            },
+            "age": {
+                "type": "integer",
+                "description": "a number from 0 to 23, which represent the person's age",
+                "minimum": 0,
+                "maximum": 23,
+            },
+        },
+        "required": ["name", "age"],
+        "additionalProperties": False,
+    },
+    "strict": True,
+}
+
 tool_select_name = {
     "type": "function",
     "function": {
         "name": "select_name",
         "description": "select a name",
-        "additionalproperties": "false",
-        "strict": "true",
+        "additionalproperties": False,
+        "strict": True,
         "parameters": {
             "type": "object",
             "properties": {
@@ -112,6 +136,11 @@ def http_request(args):
         payload["messages"] = [{"role": "user", "content": args.user_content}]
         if args.ebnf:
             payload["ebnf"] = ebnf_content
+        elif args.json_schema_response_format:
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": json_schema_response_format,
+            }
         elif args.tools:
             payload["tools"] = tools
             payload["tool_choice"] = "required"
@@ -322,6 +351,11 @@ if __name__ == "__main__":
     mutex_group = parser.add_mutually_exclusive_group()
     mutex_group.add_argument(
         "--ebnf", action="store_true", help="Constrained Decoding for EBNF format"
+    )
+    mutex_group.add_argument(
+        "--json-schema-response-format",
+        action="store_true",
+        help="JSON Schema Response Format",
     )
     mutex_group.add_argument("--tools", action="store_true", help="Add tool")
     mutex_group.add_argument("--msg-path", type=str, help="The path of messages")
