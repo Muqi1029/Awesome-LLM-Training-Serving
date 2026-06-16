@@ -1,4 +1,4 @@
-"""Usage: python one_request.py."""
+"""Usage: python one_request.py"""
 
 import argparse
 import json
@@ -8,15 +8,16 @@ from pprint import pprint
 import numpy as np
 import requests
 
-query_content = "who are you"
+QUERY_CONTENT = "who are you"
+F1_DATA_PATH = "../data/f1_demo.json"
 
 
 def main(args):
     if args.mode == "query":
-        content = query_content
+        content = QUERY_CONTENT
         max_tokens = args.max_tokens or 12
     elif args.mode == "f1":
-        with open("data/f1_demo.json") as f:
+        with open(F1_DATA_PATH) as f:
             content = json.load(f)["prompt"]
         max_tokens = args.max_tokens or 4
     else:
@@ -25,10 +26,10 @@ def main(args):
     payload = {
         "model": "",
         "max_tokens": max_tokens,
-        # "stop": "<|im_end|>",
         "messages": [
             {"role": "user", "content": content},
         ],
+        # "stop": "<|im_end|>",
         # "beam_width_array": [1, 2]
         # "num_beam_samples": 4,
         # "early_stopping": False,
@@ -41,6 +42,7 @@ def main(args):
         payload.update({"n": args.beam, "best_of": args.beam, "use_beam_search": True})
 
     latency_ms_list = []
+    response = None
     for _ in range(args.n):
         try:
             start_tic = time.perf_counter()
@@ -57,10 +59,11 @@ def main(args):
 
             pprint(response.json())
         except requests.HTTPError:
-            print(response.text)
+            if response:
+                print(response.text)
         time.sleep(0.5)
 
-    # remove slowest 3
+    # remove the slowest 3
     latency_ms_list.sort()
     if len(latency_ms_list) > 3:
         latency_ms_list = latency_ms_list[3:]
