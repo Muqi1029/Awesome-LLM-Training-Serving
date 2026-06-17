@@ -371,5 +371,19 @@ def main():
     asyncio.run(run_benchmark(args))
 
 
+def test_requests():
+    args = parse_args()
+    requests = read_requests(args.requests_path)
+    interval = 100
+    for i in range(0, len(requests), interval):
+        json.dump(
+            requests[i : i + interval],
+            open(f"requests_{i}.json", "w", encoding="utf-8"),
+            indent=2,
+            ensure_ascii=False,
+        )
+
+
 if __name__ == "__main__":
     main()
+    # test_requests()
