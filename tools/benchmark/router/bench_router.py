@@ -9,7 +9,7 @@ import sys
 import time
 import traceback
 from argparse import ArgumentParser, Namespace
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from glob import glob
 from typing import Dict, List, Optional
@@ -42,6 +42,7 @@ def _create_bench_client_session():
 
 @dataclass
 class OutputMetric:
+    payload: Dict = field(default_factory=dict)
     ttft_ms: float = 0.0
     itl_ms_list: List[float] = field(default_factory=list)
     latency_ms: float = 0.0
@@ -49,7 +50,9 @@ class OutputMetric:
     completion_tokens: int = 0
     cached_tokens: int = 0
     success: bool = False
+    out_text: str = ""
     error_message: Optional[str] = None
+    finish_reason: Optional[str] = None
 
 
 def read_requests(requests_path: str) -> List[Dict]:
@@ -101,7 +104,6 @@ def normalize_payload(payload: Dict) -> None:
         "return_hidden_states",
         "continue_final_message",
         "routed_dp_rank",
-        "rid",
         "custom_logit_processor",
         "data_parallel_rank",
         "use_audio_in_video",
@@ -129,7 +131,10 @@ def normalize_payload(payload: Dict) -> None:
 
 
 async def request_func(
-    args: Namespace, payload: Dict, sem: asyncio.Semaphore, pbar: Optional[tqdm] = None
+    args: Namespace,
+    payload: Dict,
+    sem: asyncio.Semaphore,
+    pbar: Optional[tqdm] = None,
 ):
     # set model and stream
     if args.model:
@@ -146,8 +151,9 @@ async def request_func(
             ttft_ms = 0.0
             latency_ms = 0.0
             st = time.perf_counter()
+            out_text = ""
             most_recent_timestamp = st
-            output = OutputMetric()
+            output = OutputMetric(payload=payload)
 
             try:
                 async with session.post(
@@ -183,13 +189,18 @@ async def request_func(
                                 if not choices:
                                     continue
 
+                                # get finish reason
+                                if finish_reason := choices[0].get("finish_reason"):
+                                    output.finish_reason = finish_reason
+
                                 # Reasoning models stream thoughts via
                                 # `reasoning_content`; count them like content.
                                 delta = choices[0].get("delta") or {}
 
-                                if delta.get("reasoning_content") or delta.get(
-                                    "content"
+                                if reasoning_content := delta.get(
+                                    "reasoning_content", ""
                                 ):
+                                    output.out_text += reasoning_content
                                     timestamp = time.perf_counter()
                                     # First token
                                     if ttft_ms == 0.0:
@@ -204,6 +215,47 @@ async def request_func(
                                         output.itl_ms_list.append(itl_ms)
 
                                     most_recent_timestamp = timestamp
+
+                                if content := delta.get("content", ""):
+                                    output.out_text += content
+                                    timestamp = time.perf_counter()
+                                    # First token
+                                    if ttft_ms == 0.0:
+                                        ttft_ms = (timestamp - st) * 1000
+                                        output.ttft_ms = ttft_ms
+
+                                    # Decoding phase
+                                    else:
+                                        itl_ms = (
+                                            timestamp - most_recent_timestamp
+                                        ) * 1000
+                                        output.itl_ms_list.append(itl_ms)
+
+                                    most_recent_timestamp = timestamp
+
+                                if tool_calls := delta.get("tool_calls", ""):
+                                    tc = tool_calls[0]
+                                    if func_name := tc.get("function", {}).get("name"):
+                                        output.out_text += f"\n\n[Tool Call Detected]: Function={func_name}\nArgument:"
+                                    if func_arg := tc.get("function", {}).get(
+                                        "arguments"
+                                    ):
+                                        output.out_text += func_arg
+                                    timestamp = time.perf_counter()
+                                    # First token
+                                    if ttft_ms == 0.0:
+                                        ttft_ms = (timestamp - st) * 1000
+                                        output.ttft_ms = ttft_ms
+
+                                    # Decoding phase
+                                    else:
+                                        itl_ms = (
+                                            timestamp - most_recent_timestamp
+                                        ) * 1000
+                                        output.itl_ms_list.append(itl_ms)
+
+                                    most_recent_timestamp = timestamp
+
                         output.latency_ms = latency_ms
                         output.success = True
                     else:
@@ -258,6 +310,30 @@ def handle_outputs(outputs: List[OutputMetric], duration_s: float):
     print(f"Mean prompt tokens: {np.mean(prompt_tokens_list):.2f} tokens")
     print(f"Mean cached tokens ratio: {np.mean(cached_tokens_ratio_list):.2%}")
     print(f"Mean completion tokens: {np.mean(completion_tokens_list):.2f} tokens")
+
+    # dump completion tokens
+    if completion_tokens_list:
+        logger.info(
+            f"Dumping {len(completion_tokens_list)} completion tokens to completion_tokens.json"
+        )
+        with open("completion_tokens.json", mode="w", encoding="utf-8") as f:
+            json.dump(completion_tokens_list, f, ensure_ascii=False, indent=2)
+
+    # dump finish length requests
+    finish_reason_length_list = [
+        output for output in filtered_outputs if output.finish_reason == "length"
+    ]
+    if finish_reason_length_list:
+        logger.info(
+            f"Dumping {len(finish_reason_length_list)} finish reason 'length' to finish_reason_length.json"
+        )
+        with open("finish_reason_length.json", mode="w", encoding="utf-8") as f:
+            json.dump(
+                [asdict(output) for output in finish_reason_length_list],
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
     print("=" * 100)
 
 
@@ -289,6 +365,7 @@ async def run_benchmark(args):
     sem = asyncio.Semaphore(args.max_concurrency)
 
     # warmup
+    pbar = None
     if args.warmup_requests:
         logger.info(f"Warming up {args.warmup_requests} requests")
         warmup_requests = requests[: args.warmup_requests]
@@ -301,14 +378,16 @@ async def run_benchmark(args):
         )
         logger.info(f"Warming up done")
 
-    pbar.reset(total=len(requests[args.warmup_requests :]))
-    pbar.set_description("Formally running")
+    if pbar:
+        pbar.reset(total=len(requests[args.warmup_requests :]))
+        pbar.set_description("Formally running")
     tasks = []
     benchmark_start_time = time.perf_counter()
     async for req in get_request(requests[args.warmup_requests :], args.request_rate):
         tasks.append(asyncio.create_task(request_func(args, req, sem, pbar)))
     outputs = await asyncio.gather(*tasks)
-    pbar.close()
+    if pbar:
+        pbar.close()
     benchmark_end_time = time.perf_counter()
     duration_s = benchmark_end_time - benchmark_start_time
 
