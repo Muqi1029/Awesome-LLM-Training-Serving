@@ -67,7 +67,7 @@ def parse_args():
         help="The number of requests in total for this benchmark",
     )
     parser.add_argument(
-        "--warmup",
+        "--warmup-requests",
         default=0,
         type=int,
         help="The number of warmup requests before benchmark, not counted in metrics",

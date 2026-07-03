@@ -12,8 +12,6 @@ python bench_embed.py \
     --data-path ../data/lexical_embed.json \
     --qps 50 \
     --max-concurrency 50 \
-    --num-requests 1000
-
-python
-
+    --num-requests 1000 \
+    --warmup-requests 200
 ```
