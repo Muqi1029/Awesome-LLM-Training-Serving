@@ -56,7 +56,7 @@ def parse_args():
     )
     parser.add_argument(
         "--max-concurrency",
-        default=1024,
+        default=128,
         type=int,
         help="Maximum number of in-flight requests",
     )
@@ -66,6 +66,12 @@ def parse_args():
         type=int,
         help="The number of requests in total for this benchmark",
     )
+    parser.add_argument(
+        "--warmup",
+        default=0,
+        type=int,
+        help="The number of warmup requests before benchmark, not counted in metrics",
+    )
     parser.add_argument("--data-path", required=True, type=str, help="The path to data")
     parser.add_argument(
         "--api", default="/embed_lexical", type=str, help="The testing API"
@@ -73,6 +79,13 @@ def parse_args():
 
     parser.add_argument(
         "--debug", action="store_true", help="The debug mode for testing connection"
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        type=str.upper,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Logging level",
     )
     return parser.parse_args()
 
@@ -82,6 +95,8 @@ def validate_args(args: Namespace) -> None:
         raise ValueError("qps must be positive")
     if args.num_requests < 0:
         raise ValueError("num-requests must be greater than or equal to 0")
+    if args.warmup < 0:
+        raise ValueError("warmup must be greater than or equal to 0")
     if args.max_concurrency <= 0:
         raise ValueError("max-concurrency must be positive")
 
@@ -158,6 +173,40 @@ async def read_response(response: aiohttp.ClientResponse) -> Any:
     return await response.text()
 
 
+async def run_requests(
+    session: aiohttp.ClientSession,
+    request_data: list[dict],
+    request_endpoint: str,
+    request_headers: dict[str, str],
+    max_concurrency: int,
+    qps: float,
+    num_requests: int,
+    desc: Optional[str] = None,
+) -> list[OutputMetric]:
+    sem = asyncio.Semaphore(max_concurrency)
+    tasks = []
+    pbar = tqdm(total=num_requests, desc=desc) if desc else None
+
+    async for payload in payload_generator(qps, request_data, num_requests):
+        tasks.append(
+            asyncio.create_task(
+                request_func(
+                    session,
+                    payload,
+                    request_endpoint,
+                    headers=request_headers,
+                    sem=sem,
+                    pbar=pbar,
+                )
+            )
+        )
+    results: list[OutputMetric] = await asyncio.gather(*tasks)
+
+    if pbar:
+        pbar.close()
+    return results
+
+
 async def benchmark(request_endpoint, args: Namespace):
 
     request_data: list[dict] = read_data(args.data_path)
@@ -165,11 +214,7 @@ async def benchmark(request_endpoint, args: Namespace):
     request_headers = {"Content-Type": "application/json"}
     if args.api_key:
         request_headers["Authorization"] = args.api_key
-    benchmark_start_time = time.perf_counter()
 
-    sem = asyncio.Semaphore(args.max_concurrency)
-    tasks = []
-    pbar = tqdm(total=args.num_requests, desc="Benchmark")
     timeout = aiohttp.ClientTimeout(total=BENCH_AIOHTTP_TIMEOUT_SECONDS)
     connector = aiohttp.TCPConnector(limit=args.max_concurrency)
     async with aiohttp.ClientSession(
@@ -177,23 +222,36 @@ async def benchmark(request_endpoint, args: Namespace):
         connector=connector,
         read_bufsize=BENCH_AIOHTTP_READ_BUFSIZE_BYTES,
     ) as session:
-        async for payload in payload_generator(
-            args.qps, request_data, args.num_requests
-        ):
-            tasks.append(
-                asyncio.create_task(
-                    request_func(
-                        session,
-                        payload,
-                        request_endpoint,
-                        headers=request_headers,
-                        sem=sem,
-                        pbar=pbar,
-                    )
-                )
+        if args.warmup > 0:
+            logger.info("Start warmup with %s requests", args.warmup)
+            warmup_results = await run_requests(
+                session,
+                request_data,
+                request_endpoint,
+                request_headers,
+                args.max_concurrency,
+                args.qps,
+                args.warmup,
+                desc="Warmup",
             )
-        results: list[OutputMetric] = await asyncio.gather(*tasks)
-    pbar.close()
+            warmup_success = sum(output.success for output in warmup_results)
+            logger.info(
+                "Warmup finished: %s/%s succeeded",
+                warmup_success,
+                len(warmup_results),
+            )
+
+        benchmark_start_time = time.perf_counter()
+        results = await run_requests(
+            session,
+            request_data,
+            request_endpoint,
+            request_headers,
+            args.max_concurrency,
+            args.qps,
+            args.num_requests,
+            desc="Benchmark",
+        )
 
     benchmark_elapsed_time = time.perf_counter() - benchmark_start_time
     actual_qps = (
@@ -281,13 +339,19 @@ def compute_metrics(result: BenchmarkResult):
 
 async def main():
     args: Namespace = parse_args()
+    logging.getLogger().setLevel(args.log_level)
     validate_args(args)
     request_endpoint = args.base_url + args.api
 
     if args.debug:
-        logger.info(f"[DEBUG MODE]: set QPS to 3, num_requests to 10")
+        logging.getLogger().setLevel(logging.DEBUG)
+
+        logger.info(
+            f"[DEBUG MODE]: set QPS to 3, num_requests to 10, warmup requests to 0"
+        )
         args.qps = 3
         args.num_requests = 10
+        args.warmup_requests = 0
     else:
         logger.info(f"[FORMAL MODE]: {args=}")
 
