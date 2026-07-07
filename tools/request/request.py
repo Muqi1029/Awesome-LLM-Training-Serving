@@ -8,6 +8,7 @@ import argparse
 import json
 from enum import Enum, auto
 from pathlib import Path
+from typing import Dict
 
 import openai
 import requests
@@ -94,9 +95,61 @@ country ::= "England" | "France" | "Germany" | "Italy"
 # """
 
 
-def info_print(payload, url):
+def normalize_payload(payload: Dict) -> None:
+    """Align recorded SGLang request bodies with router/OpenAI expectations."""
+    if payload.get("min_tokens") is not None and payload["min_tokens"] < 1:
+        payload.pop("min_tokens")
+    for param in [
+        "cache_salt",
+        "bootstrap_port",
+        "stop_regex",
+        "routed_experts_start_len",
+        "session_params",
+        "encrypt_type",
+        "task",
+        "stream_reasoning",
+        "extra_key",
+        "return_routed_experts",
+        "no_stop_trim",
+        "bootstrap_room",
+        "priority",
+        "stop_token_ids",
+        "disagg_prefill_dp_rank",
+        "ebnf",
+        "return_hidden_states",
+        "continue_final_message",
+        "routed_dp_rank",
+        "rid",
+        "custom_logit_processor",
+        "data_parallel_rank",
+        "use_audio_in_video",
+        "lora_path",
+        "separate_reasoning",
+        "min_dynamic_patch",
+        "max_dynamic_patch",
+        "regex",
+        "bootstrap_host",
+        "custom_params",
+        "return_cached_tokens_details",
+    ]:
+        if param in payload:
+            payload.pop(param)
+
+    response_format = payload.get("response_format")
+    if not isinstance(response_format, dict):
+        return
+    json_schema = response_format.get("json_schema")
+    if not isinstance(json_schema, dict):
+        return
+    # SGLang logs use schema_; router deserializer requires schema (OpenAI shape).
+    if "schema" not in json_schema and "schema_" in json_schema:
+        json_schema["schema"] = json_schema.pop("schema_")
+
+
+def info_print(headers, payload, url):
     print("=" * 80)
     print(f"Sending to {url=}")
+    print(f"headers={json.dumps(headers, indent=2, ensure_ascii=False)}")
     print(f"payload={json.dumps(payload, indent=2, ensure_ascii=False)}")
 
 
@@ -188,7 +241,7 @@ def http_request(args):
             "include_usage": True,
             "continuous_usage_stats": True,
         }
-    info_print(payload, url)
+    info_print(headers, payload, url)
     if args.disable_stream:
         payload["stream"] = False
         res = requests.post(
@@ -208,6 +261,7 @@ def http_request(args):
             )
     else:
         payload["stream"] = True
+        normalize_payload(payload)
         res = requests.post(
             url=url,
             headers=headers,
