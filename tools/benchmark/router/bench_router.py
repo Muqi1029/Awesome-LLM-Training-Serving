@@ -94,7 +94,17 @@ class OutputMetric:
     finish_reason: Optional[str] = None
 
 
-def read_requests(requests_path: str) -> List[Dict]:
+def tool_filter_request(req: dict):
+    if req["tool_choices"] == "required" or isinstance(req["tool_choices"], dict):
+        return False
+    if any([tool["strict"] for tool in req["tools"]]):
+        return False
+    if req["response_format"]:
+        return False
+    return True
+
+
+def read_requests(requests_path: str, args) -> List[Dict]:
     data: Dict[str, str] = {}
     file_paths = sorted(glob(os.path.join(requests_path, "*.json")))
     logger.info(f"Reading {len(file_paths)} files from {requests_path}")
@@ -109,6 +119,11 @@ def read_requests(requests_path: str) -> List[Dict]:
         data.items(), key=lambda x: datetime.strptime(x[0], DATE_FORMAT)
     )
     requests = [json.loads(content) for _, content in sorted_items]
+    if args.filter_constrained_grammar_requests:
+        filtered_requests = [req for req in requests if tool_filter_request(req)]
+        num_filtered_requests = len(requests) - len(filtered_requests)
+        logger.info(f"Filter {num_filtered_requests} due to constrained decoding")
+        requests = filtered_requests
     logger.info(f"Read {len(requests)} requests")
     return requests
 
@@ -440,7 +455,7 @@ async def get_request(requests, request_rate):
 
 async def run_benchmark(args):
     # read dataset
-    requests = read_requests(args.requests_path)
+    requests = read_requests(args.requests_path, args)
     request_url = args.base_url.rstrip("/") + "/v1/chat/completions"
 
     if args.debug:
@@ -557,6 +572,11 @@ def parse_args():
         default=None,
         help="Optional path to dump outputs whose finish_reason is 'length'",
     )
+    parser.add_argument(
+        "--filter-constrained-grammar-requests",
+        action="store_true",
+        help="Filter constrained grammar requests",
+    )
 
     parser.add_argument("--debug", action="store_true", help="Debug mode")
 
@@ -577,7 +597,7 @@ def main():
 
 def test_requests():
     args = parse_args()
-    requests = read_requests(args.requests_path)
+    requests = read_requests(args.requests_path, args)
     interval = 100
     for i in range(0, len(requests), interval):
         with open(f"requests_{i}.json", "w", encoding="utf-8") as f:
