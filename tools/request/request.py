@@ -244,8 +244,8 @@ def print_metrics(
         token_per_sec = completion_tokens / e2e
 
     itl_mean = None
-    if completion_tokens and completion_tokens > 0:
-        itl_mean = e2e_ms / completion_tokens
+    if completion_tokens and completion_tokens > 1 and ttft_ms is not None:
+        itl_mean = (e2e_ms - ttft_ms) / (completion_tokens - 1)
 
     def fmt(value, suffix=""):
         if value is None:
