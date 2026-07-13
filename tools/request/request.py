@@ -287,7 +287,10 @@ def print_metrics(
 
 def http_request(args):
     url = f"{args.base_url}/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {args.api_key}"}
+    headers = {
+        "Authorization": f"Bearer {args.api_key}",
+        "business_source": "deephire_geek_resume_chat",
+    }
 
     # construct payload
     payload = {}
@@ -344,7 +347,6 @@ def http_request(args):
     elif args.disable_thinking:
         payload["chat_template_kwargs"] = {"enable_thinking": False}
 
-    payload["log_metrics"] = True
 
     if not args.disable_stream:
         payload["stream_options"] = {
@@ -625,3 +627,4 @@ if __name__ == "__main__":
         http_request(args)
     else:
         openai_request(args)
+
