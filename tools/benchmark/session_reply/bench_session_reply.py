@@ -474,7 +474,7 @@ async def run_benchmark(args):
         # warmup
         pbar = None
         if args.num_warmup_sessions:
-            logger.info(f"Warming up {args.num_warmup_sessions} requests")
+            logger.info(f"Warming up {args.num_warmup_sessions} session requests")
             warmup_session_requests = session_requests[: args.num_warmup_sessions]
             pbar = tqdm(total=len(warmup_session_requests), desc="Warmup")
             await asyncio.gather(
@@ -549,7 +549,7 @@ def parse_args():
     )
     parser.add_argument(
         "--num-warmup-sessions",
-        default=1,
+        default=3,
         type=int,
         help="The number of requests to warmup",
     )
