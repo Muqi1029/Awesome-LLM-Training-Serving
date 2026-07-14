@@ -152,7 +152,7 @@ async def request_func(
     async with sem:
         # set model and stream
         # Keep payloads in the same session strictly sequential.
-        for raw_payload in session_payloads:
+        for payload_index, raw_payload in enumerate(session_payloads):
             payload = raw_payload.copy()
             if args.model:
                 payload["model"] = args.model
@@ -235,6 +235,9 @@ async def request_func(
                 output.success = False
             finally:
                 session_outputs.append(output)
+
+            if payload_index + 1 < len(session_payloads):
+                await wait_for_request_interval(args.request_rate)
 
     if pbar:
         pbar.update(1)
@@ -437,14 +440,18 @@ def handle_outputs(
             )
 
 
+async def wait_for_request_interval(request_rate: float) -> None:
+    if request_rate == float("inf"):
+        return
+
+    interval = np.random.exponential(1.0 / request_rate)
+    await asyncio.sleep(interval)
+
+
 async def get_request(requests, request_rate):
     for req in requests:
         yield req
-
-        if request_rate == float("inf"):
-            continue
-        interval = np.random.exponential(1.0 / request_rate)
-        await asyncio.sleep(interval)
+        await wait_for_request_interval(request_rate)
 
 
 async def run_benchmark(args):
@@ -463,7 +470,7 @@ async def run_benchmark(args):
 
     if args.max_concurrency < 1:
         raise ValueError("--max-concurrency must be >= 1")
-    if args.request_rate <= 0:
+    if not (args.request_rate > 0):
         raise ValueError("--request-rate must be > 0")
 
     sem = asyncio.Semaphore(args.max_concurrency)
@@ -501,7 +508,12 @@ async def run_benchmark(args):
             tasks.append(
                 asyncio.create_task(
                     request_func(
-                        args, session, request_url, session_payloads, sem, pbar
+                        args,
+                        session,
+                        request_url,
+                        session_payloads,
+                        sem,
+                        pbar,
                     )
                 )
             )
@@ -538,7 +550,10 @@ def parse_args():
         "--max-concurrency", default=32, type=int, help="The max concurrency"
     )
     parser.add_argument(
-        "--request-rate", default=float("inf"), type=float, help="Request rate"
+        "--request-rate",
+        default=float("inf"),
+        type=float,
+        help="Mean request rate in requests/s",
     )
 
     parser.add_argument(
