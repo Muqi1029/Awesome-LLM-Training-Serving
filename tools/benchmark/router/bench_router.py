@@ -320,6 +320,24 @@ def print_table(title: str, rows: List[List[str]]) -> None:
     print(border)
 
 
+def flatten_itl_ms(outputs: List[OutputMetric]) -> List[float]:
+    return [itl_ms for output in outputs for itl_ms in output.itl_ms_list]
+
+
+def format_mean(values: List[float], precision: int = 2) -> str:
+    if not values:
+        return "N/A"
+    return f"{np.mean(values):.{precision}f}"
+
+
+def format_percentile(
+    values: List[float], percentile: float, precision: int = 2
+) -> str:
+    if not values:
+        return "N/A"
+    return f"{np.percentile(values, percentile):.{precision}f}"
+
+
 def handle_outputs(
     outputs: List[OutputMetric],
     duration_s: float,
@@ -348,6 +366,7 @@ def handle_outputs(
         return
 
     ttft_ms_list = [output.ttft_ms for output in filtered_outputs]
+    itl_ms_list = flatten_itl_ms(filtered_outputs)
     latency_ms_list = [output.latency_ms for output in filtered_outputs]
     prompt_tokens_list = [output.prompt_tokens for output in filtered_outputs]
     cached_tokens_list = [output.cached_tokens for output in filtered_outputs]
@@ -376,42 +395,77 @@ def handle_outputs(
     print_table(
         "Latency & Token Metrics",
         [
-            ["Metric", "Mean", "P95", "Unit"],
+            ["Metric", "Mean", "P95", "P99", "Unit"],
             [
                 "TTFT",
-                f"{np.mean(ttft_ms_list):.2f}",
-                f"{np.percentile(ttft_ms_list, 95):.2f}",
+                format_mean(ttft_ms_list),
+                format_percentile(ttft_ms_list, 95),
+                format_percentile(ttft_ms_list, 99),
+                "ms",
+            ],
+            [
+                "ITL",
+                format_mean(itl_ms_list),
+                format_percentile(itl_ms_list, 95),
+                format_percentile(itl_ms_list, 99),
                 "ms",
             ],
             [
                 "Latency",
-                f"{np.mean(latency_ms_list):.2f}",
-                f"{np.percentile(latency_ms_list, 95):.2f}",
+                format_mean(latency_ms_list),
+                format_percentile(latency_ms_list, 95),
+                format_percentile(latency_ms_list, 99),
                 "ms",
             ],
             [
                 "Prompt tokens",
-                f"{np.mean(prompt_tokens_list):.2f}",
-                f"{np.percentile(prompt_tokens_list, 95):.2f}",
+                format_mean(prompt_tokens_list),
+                format_percentile(prompt_tokens_list, 95),
+                format_percentile(prompt_tokens_list, 99),
                 "tokens",
             ],
             [
                 "Completion tokens",
-                f"{np.mean(completion_tokens_list):.2f}",
-                f"{np.percentile(completion_tokens_list, 95):.2f}",
+                format_mean(completion_tokens_list),
+                format_percentile(completion_tokens_list, 95),
+                format_percentile(completion_tokens_list, 99),
                 "tokens",
             ],
             [
                 "Cached tokens",
-                f"{np.mean(cached_tokens_list):.2f}",
-                f"{np.percentile(cached_tokens_list, 95):.2f}",
+                format_mean(cached_tokens_list),
+                format_percentile(cached_tokens_list, 95),
+                format_percentile(cached_tokens_list, 99),
                 "tokens",
             ],
             [
                 "Cached token ratio",
                 f"{np.mean(cached_tokens_ratio_list):.2%}",
                 f"{np.percentile(cached_tokens_ratio_list, 95):.2%}",
+                f"{np.percentile(cached_tokens_ratio_list, 99):.2%}",
                 "ratio",
+            ],
+        ],
+    )
+
+    finish_reason_counts = {
+        finish_reason: sum(
+            output.finish_reason == finish_reason for output in filtered_outputs
+        )
+        for finish_reason in ("stop", "length")
+    }
+    print()
+    print_table(
+        "Finish Reason Statistics",
+        [
+            ["Finish reason", "Requests", "Percentage"],
+            *[
+                [
+                    finish_reason,
+                    str(count),
+                    f"{count / num_success_requests:.2%}",
+                ]
+                for finish_reason, count in finish_reason_counts.items()
             ],
         ],
     )
