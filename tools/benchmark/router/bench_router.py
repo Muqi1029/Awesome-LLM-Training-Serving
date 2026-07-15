@@ -19,6 +19,12 @@ import aiohttp
 import numpy as np
 from tqdm import tqdm
 
+BENCHMARK_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BENCHMARK_DIR not in sys.path:
+    sys.path.insert(0, BENCHMARK_DIR)
+
+from benchmark_utils import print_table  # noqa: E402
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -83,7 +89,6 @@ def _create_bench_client_session(max_concurrency: int, api_key: str):
 class OutputMetric:
     payload: Dict = field(default_factory=dict)
     ttft_ms: float = 0.0
-    itl_ms_list: List[float] = field(default_factory=list)
     latency_ms: float = 0.0
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -166,22 +171,17 @@ async def iter_sse_data(response: aiohttp.ClientResponse) -> AsyncIterator[str]:
         yield line[len("data:") :].lstrip()
 
 
-def update_stream_timing(
+def update_stream_output(
     output: OutputMetric,
     text: str,
     start_time: float,
-    most_recent_timestamp: float,
-) -> float:
+) -> None:
     if not text:
-        return most_recent_timestamp
+        return
 
     output.out_text += text
-    timestamp = time.perf_counter()
     if output.ttft_ms == 0.0:
-        output.ttft_ms = (timestamp - start_time) * 1000
-    else:
-        output.itl_ms_list.append((timestamp - most_recent_timestamp) * 1000)
-    return timestamp
+        output.ttft_ms = (time.perf_counter() - start_time) * 1000
 
 
 async def request_func(
@@ -208,7 +208,6 @@ async def request_func(
     try:
         async with sem:
             st = time.perf_counter()
-            most_recent_timestamp = st
             async with session.post(url=request_url, json=payload) as response:
                 if response.status == 200:
                     async for chunk in iter_sse_data(response):
@@ -237,17 +236,15 @@ async def request_func(
                         # Reasoning models stream thoughts via `reasoning_content`;
                         # count them like content.
                         delta = choice.get("delta") or {}
-                        most_recent_timestamp = update_stream_timing(
+                        update_stream_output(
                             output,
                             delta.get("reasoning_content", ""),
                             st,
-                            most_recent_timestamp,
                         )
-                        most_recent_timestamp = update_stream_timing(
+                        update_stream_output(
                             output,
                             delta.get("content", ""),
                             st,
-                            most_recent_timestamp,
                         )
 
                         if tool_calls := delta.get("tool_calls"):
@@ -261,11 +258,10 @@ async def request_func(
                                     )
                                 if func_arg := function.get("arguments"):
                                     tool_text_parts.append(func_arg)
-                            most_recent_timestamp = update_stream_timing(
+                            update_stream_output(
                                 output,
                                 "".join(tool_text_parts),
                                 st,
-                                most_recent_timestamp,
                             )
 
                     output.latency_ms = (time.perf_counter() - st) * 1000
@@ -298,30 +294,14 @@ def filter_outputs(outputs: List[OutputMetric]) -> List[OutputMetric]:
     return filtered_outputs
 
 
-def print_table(title: str, rows: List[List[str]]) -> None:
-    if not rows:
-        return
+def calculate_itl_ms(output: OutputMetric) -> Optional[float]:
+    if output.completion_tokens <= 1 or output.ttft_ms <= 0.0:
+        return None
 
-    widths = [max(len(str(row[i])) for row in rows) for i in range(len(rows[0]))]
-    border = "+-" + "-+-".join("-" * width for width in widths) + "-+"
-    title_line = f"| {title.center(len(border) - 4)} |"
-
-    print(border)
-    print(title_line)
-    print(border)
-    for idx, row in enumerate(rows):
-        print(
-            "| "
-            + " | ".join(str(value).ljust(widths[i]) for i, value in enumerate(row))
-            + " |"
-        )
-        if idx == 0:
-            print(border)
-    print(border)
-
-
-def flatten_itl_ms(outputs: List[OutputMetric]) -> List[float]:
-    return [itl_ms for output in outputs for itl_ms in output.itl_ms_list]
+    generation_time_ms = output.latency_ms - output.ttft_ms
+    if generation_time_ms < 0.0:
+        return None
+    return generation_time_ms / (output.completion_tokens - 1)
 
 
 def format_mean(values: List[float], precision: int = 2) -> str:
@@ -368,7 +348,11 @@ def handle_outputs(
         return
 
     ttft_ms_list = [output.ttft_ms for output in filtered_outputs]
-    itl_ms_list = flatten_itl_ms(filtered_outputs)
+    itl_ms_list = [
+        itl_ms
+        for output in filtered_outputs
+        if (itl_ms := calculate_itl_ms(output)) is not None
+    ]
     latency_ms_list = [output.latency_ms for output in filtered_outputs]
     prompt_tokens_list = [output.prompt_tokens for output in filtered_outputs]
     cached_tokens_list = [output.cached_tokens for output in filtered_outputs]

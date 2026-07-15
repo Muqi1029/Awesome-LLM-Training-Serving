@@ -4,6 +4,7 @@ import asyncio
 import codecs
 import json
 import logging
+import os
 import random
 import sys
 import time
@@ -16,6 +17,12 @@ from typing import AsyncIterator, Dict, List, Optional
 import aiohttp
 import numpy as np
 from tqdm import tqdm
+
+BENCHMARK_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BENCHMARK_DIR not in sys.path:
+    sys.path.insert(0, BENCHMARK_DIR)
+
+from benchmark_utils import print_table  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,7 +55,6 @@ def _create_bench_client_session(max_concurrency: int, api_key: str):
 class OutputMetric:
     payload: Dict = field(default_factory=dict)
     ttft_ms: float = 0.0
-    itl_ms_list: List[float] = field(default_factory=list)
     latency_ms: float = 0.0
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -100,22 +106,17 @@ async def iter_sse_data(response: aiohttp.ClientResponse) -> AsyncIterator[str]:
         yield line[len("data:") :].lstrip()
 
 
-def update_stream_timing(
+def update_stream_output(
     output: OutputMetric,
     text: str,
     start_time: float,
-    most_recent_timestamp: float,
-) -> float:
+) -> None:
     if not text:
-        return most_recent_timestamp
+        return
 
     output.out_text += text
-    timestamp = time.perf_counter()
     if output.ttft_ms == 0.0:
-        output.ttft_ms = (timestamp - start_time) * 1000
-    else:
-        output.itl_ms_list.append((timestamp - most_recent_timestamp) * 1000)
-    return timestamp
+        output.ttft_ms = (time.perf_counter() - start_time) * 1000
 
 
 def stream_text_or_empty(value) -> str:
@@ -163,7 +164,6 @@ async def request_func(
             }
             output = OutputMetric(payload=payload)
             st = time.perf_counter()
-            most_recent_timestamp = st
             try:
                 async with session.post(url=request_url, json=payload) as response:
                     if response.status == 200:
@@ -211,11 +211,10 @@ async def request_func(
                                             stream_text_or_empty(func_arg)
                                         )
 
-                            most_recent_timestamp = update_stream_timing(
+                            update_stream_output(
                                 output,
                                 "".join(text_parts),
                                 st,
-                                most_recent_timestamp,
                             )
 
                         output.latency_ms = (time.perf_counter() - st) * 1000
@@ -252,28 +251,6 @@ def filter_outputs(outputs: List[OutputMetric]) -> List[OutputMetric]:
     return filtered_outputs
 
 
-def print_table(title: str, rows: List[List[str]]) -> None:
-    if not rows:
-        return
-
-    widths = [max(len(str(row[i])) for row in rows) for i in range(len(rows[0]))]
-    border = "+-" + "-+-".join("-" * width for width in widths) + "-+"
-    title_line = f"| {title.center(len(border) - 4)} |"
-
-    print(border)
-    print(title_line)
-    print(border)
-    for idx, row in enumerate(rows):
-        print(
-            "| "
-            + " | ".join(str(value).ljust(widths[i]) for i, value in enumerate(row))
-            + " |"
-        )
-        if idx == 0:
-            print(border)
-    print(border)
-
-
 def flatten_outputs(outputs):
     res = []
     for output in outputs:
@@ -281,11 +258,14 @@ def flatten_outputs(outputs):
     return res
 
 
-def flatten_itl_ms(outputs: List[OutputMetric]) -> List[float]:
-    itl_ms_list = []
-    for output in outputs:
-        itl_ms_list.extend(output.itl_ms_list)
-    return itl_ms_list
+def calculate_itl_ms(output: OutputMetric) -> Optional[float]:
+    if output.completion_tokens <= 1 or output.ttft_ms <= 0.0:
+        return None
+
+    generation_time_ms = output.latency_ms - output.ttft_ms
+    if generation_time_ms < 0.0:
+        return None
+    return generation_time_ms / (output.completion_tokens - 1)
 
 
 def format_mean(values: List[float], precision: int = 2) -> str:
@@ -305,6 +285,8 @@ def format_percentile(
 def handle_outputs(
     outputs: List[List[OutputMetric]],
     duration_s: float,
+    max_concurrency: int,
+    request_rate: float,
     completion_tokens_output_path: Optional[str] = None,
     finish_reason_length_output_path: Optional[str] = None,
 ):
@@ -331,7 +313,11 @@ def handle_outputs(
         return
 
     ttft_ms_list = [output.ttft_ms for output in filtered_outputs]
-    itl_ms_list = flatten_itl_ms(filtered_outputs)
+    itl_ms_list = [
+        itl_ms
+        for output in filtered_outputs
+        if (itl_ms := calculate_itl_ms(output)) is not None
+    ]
     latency_ms_list = [output.latency_ms for output in filtered_outputs]
     prompt_tokens_list = [output.prompt_tokens for output in filtered_outputs]
     cached_tokens_list = [output.cached_tokens for output in filtered_outputs]
@@ -340,10 +326,22 @@ def handle_outputs(
         for output in filtered_outputs
     ]
     completion_tokens_list = [output.completion_tokens for output in filtered_outputs]
+    total_prompt_tokens = sum(prompt_tokens_list)
+    total_cached_tokens = sum(cached_tokens_list)
+    # Match the per-request cache ratio denominator: prompt_tokens - 1.
+    total_cacheable_prompt_tokens = total_prompt_tokens - num_success_requests
+    global_cache_ratio = (
+        total_cached_tokens / total_cacheable_prompt_tokens
+        if total_cacheable_prompt_tokens > 0
+        else 0.0
+    )
 
     duration_s = max(duration_s, 1e-9)
-    finished_qps = num_success_requests / duration_s
+    finished_requests_per_second = num_success_requests / duration_s
     output_throughput = sum(completion_tokens_list) / duration_s
+    request_rate_display = (
+        "unlimited" if request_rate == float("inf") else f"{request_rate:g} req/s"
+    )
     print_table(
         "Benchmark Summary",
         [
@@ -351,9 +349,17 @@ def handle_outputs(
             ["Total requests", str(num_total_requests)],
             ["Successful requests", str(num_success_requests)],
             ["Failed requests", str(num_failed_requests)],
+            ["Max concurrency", str(max_concurrency)],
+            ["Request rate", request_rate_display],
             ["Duration", f"{duration_s:.2f} s"],
-            ["Mean Finish Request Per Second", f"{finished_qps:.2f} req/s"],
+            [
+                "Mean finished requests per second",
+                f"{finished_requests_per_second:.2f} req/s",
+            ],
             ["Output throughput", f"{output_throughput:.2f} tokens/s"],
+            ["Total prompt tokens", f"{total_prompt_tokens} tokens"],
+            ["Total cached tokens", f"{total_cached_tokens} tokens"],
+            ["Global cache ratio", f"{global_cache_ratio:.2%}"],
         ],
     )
     print()
@@ -409,6 +415,29 @@ def handle_outputs(
                 f"{np.percentile(cached_tokens_ratio_list, 95):.2%}",
                 f"{np.percentile(cached_tokens_ratio_list, 99):.2%}",
                 "ratio",
+            ],
+        ],
+    )
+
+    finish_reasons = ("stop", "length", "tool_calls", "abort")
+    finish_reason_counts = {
+        finish_reason: sum(
+            output.finish_reason == finish_reason for output in filtered_outputs
+        )
+        for finish_reason in finish_reasons
+    }
+    print()
+    print_table(
+        "Finish Reason Statistics",
+        [
+            ["Finish reason", "Requests", "Percentage"],
+            *[
+                [
+                    finish_reason,
+                    str(count),
+                    f"{count / num_success_requests:.2%}",
+                ]
+                for finish_reason, count in finish_reason_counts.items()
             ],
         ],
     )
@@ -525,10 +554,12 @@ async def run_benchmark(args):
 
     # handle outputs
     handle_outputs(
-        outputs,
-        duration_s,
-        args.completion_tokens_output_path,
-        args.finish_reason_length_output_path,
+        outputs=outputs,
+        duration_s=duration_s,
+        max_concurrency=args.max_concurrency,
+        request_rate=args.request_rate,
+        completion_tokens_output_path=args.completion_tokens_output_path,
+        finish_reason_length_output_path=args.finish_reason_length_output_path,
     )
 
 
