@@ -341,6 +341,8 @@ def format_percentile(
 def handle_outputs(
     outputs: List[OutputMetric],
     duration_s: float,
+    max_concurrency: int,
+    request_rate: float,
     completion_tokens_output_path: Optional[str] = None,
     finish_reason_length_output_path: Optional[str] = None,
 ):
@@ -377,8 +379,11 @@ def handle_outputs(
     completion_tokens_list = [output.completion_tokens for output in filtered_outputs]
 
     duration_s = max(duration_s, 1e-9)
-    qps = num_success_requests / duration_s
+    finished_requests_per_second = num_success_requests / duration_s
     output_throughput = sum(completion_tokens_list) / duration_s
+    request_rate_display = (
+        "unlimited" if request_rate == float("inf") else f"{request_rate:g} req/s"
+    )
     print_table(
         "Benchmark Summary",
         [
@@ -386,8 +391,13 @@ def handle_outputs(
             ["Total requests", str(num_total_requests)],
             ["Successful requests", str(num_success_requests)],
             ["Failed requests", str(num_failed_requests)],
+            ["Max concurrency", str(max_concurrency)],
+            ["Request rate", request_rate_display],
             ["Duration", f"{duration_s:.2f} s"],
-            ["QPS", f"{qps:.2f} req/s"],
+            [
+                "Mean finished requests per second",
+                f"{finished_requests_per_second:.2f} req/s",
+            ],
             ["Output throughput", f"{output_throughput:.2f} tokens/s"],
         ],
     )
@@ -448,11 +458,12 @@ def handle_outputs(
         ],
     )
 
+    finish_reasons = ("stop", "length", "tool_calls", "abort")
     finish_reason_counts = {
         finish_reason: sum(
             output.finish_reason == finish_reason for output in filtered_outputs
         )
-        for finish_reason in ("stop", "length")
+        for finish_reason in finish_reasons
     }
     print()
     print_table(
@@ -570,10 +581,12 @@ async def run_benchmark(args):
 
     # handle outputs
     handle_outputs(
-        outputs,
-        duration_s,
-        args.completion_tokens_output_path,
-        args.finish_reason_length_output_path,
+        outputs=outputs,
+        duration_s=duration_s,
+        max_concurrency=args.max_concurrency,
+        request_rate=args.request_rate,
+        completion_tokens_output_path=args.completion_tokens_output_path,
+        finish_reason_length_output_path=args.finish_reason_length_output_path,
     )
 
 
