@@ -537,7 +537,7 @@ async def run_benchmark(args):
 
     if args.debug:
         args.num_requests = 10
-        args.warmup_requests = 3
+        args.num_warmup_requests = 3
         logger.info(f"Debug mode: only use {args.num_requests} benchmark requests")
         logger.info(f"Debug mode: only use {args.warmup_requests} warmup requests")
 
@@ -557,11 +557,10 @@ async def run_benchmark(args):
         args.max_concurrency, args.api_key
     ) as session:
         # warmup
-        pbar = None
-        if args.warmup_requests:
-            logger.info(f"Warming up {args.warmup_requests} requests")
-            warmup_requests = requests[: args.warmup_requests]
-            pbar = tqdm(total=len(warmup_requests), desc="Warmup")
+        if args.num_warmup_requests:
+            pbar = tqdm(total=args.num_warmup_requests, desc="Warmup")
+            logger.info(f"Warming up {args.num_warmup_requests} requests")
+            warmup_requests = requests[: args.num_warmup_requests]
             await asyncio.gather(
                 *[
                     asyncio.create_task(
@@ -572,13 +571,13 @@ async def run_benchmark(args):
             )
             logger.info(f"Warming up done")
 
-        if pbar:
-            pbar.reset(total=len(requests[args.warmup_requests :]))
-            pbar.set_description("Formally running")
+        pbar = tqdm(
+            total=len(requests[args.num_warmup_requests :]), desc="Formally running"
+        )
         tasks = []
         benchmark_start_time = time.perf_counter()
         async for req in get_request(
-            requests[args.warmup_requests :], args.request_rate
+            requests[args.num_warmup_requests :], args.request_rate
         ):
             tasks.append(
                 asyncio.create_task(
@@ -586,8 +585,6 @@ async def run_benchmark(args):
                 )
             )
         outputs = await asyncio.gather(*tasks)
-        if pbar:
-            pbar.close()
         benchmark_end_time = time.perf_counter()
         duration_s = benchmark_end_time - benchmark_start_time
 
@@ -630,7 +627,7 @@ def parse_args():
         help="The number of requests to benchmark",
     )
     parser.add_argument(
-        "--warmup-requests",
+        "--num-warmup-requests",
         default=100,
         type=int,
         help="The number of requests to warmup",
