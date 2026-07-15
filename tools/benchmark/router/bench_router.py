@@ -377,6 +377,15 @@ def handle_outputs(
         for output in filtered_outputs
     ]
     completion_tokens_list = [output.completion_tokens for output in filtered_outputs]
+    total_prompt_tokens = sum(prompt_tokens_list)
+    total_cached_tokens = sum(cached_tokens_list)
+    # Match the per-request cache ratio denominator: prompt_tokens - 1.
+    total_cacheable_prompt_tokens = total_prompt_tokens - num_success_requests
+    global_cache_ratio = (
+        total_cached_tokens / total_cacheable_prompt_tokens
+        if total_cacheable_prompt_tokens > 0
+        else 0.0
+    )
 
     duration_s = max(duration_s, 1e-9)
     finished_requests_per_second = num_success_requests / duration_s
@@ -399,6 +408,9 @@ def handle_outputs(
                 f"{finished_requests_per_second:.2f} req/s",
             ],
             ["Output throughput", f"{output_throughput:.2f} tokens/s"],
+            ["Total prompt tokens", f"{total_prompt_tokens} tokens"],
+            ["Total cached tokens", f"{total_cached_tokens} tokens"],
+            ["Global cache ratio", f"{global_cache_ratio:.2%}"],
         ],
     )
     print()
