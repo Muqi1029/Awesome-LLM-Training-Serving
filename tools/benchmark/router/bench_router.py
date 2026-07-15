@@ -539,7 +539,7 @@ async def run_benchmark(args):
         args.num_requests = 10
         args.num_warmup_requests = 3
         logger.info(f"Debug mode: only use {args.num_requests} benchmark requests")
-        logger.info(f"Debug mode: only use {args.warmup_requests} warmup requests")
+        logger.info(f"Debug mode: only use {args.num_warmup_requests} warmup requests")
 
     # prune
     if args.num_requests:
