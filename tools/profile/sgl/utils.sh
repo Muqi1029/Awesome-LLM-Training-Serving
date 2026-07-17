@@ -1,15 +1,24 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-set -x
+: "${BASE_URL:?BASE_URL is required}"
+: "${API_KEY:?API_KEY is required}"
 
-curl -X POST ${BASE_URL}/start_profile \
+curl -X POST "${BASE_URL}/start_profile" \
     -H "Content-Type: application/json" \
     -H "Authorization: ${API_KEY}" \
     -d '{
-        "output_dir": "/tmp/sgl_055",
+        "output_dir": "/tmp/sgl_profile"
     }'
 
-python send_request.py
+curl -X POST "${BASE_URL}/v1/chat/completions" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: ${API_KEY}" \
+    -d '{
+        "messages": [{"role": "user", "content": "who are you"}],
+        "max_tokens": 1000,
+        "ignore_eos": true
+    }'
 
-curl -X POST ${BASE_URL}/stop_profile \
+curl -X POST "${BASE_URL}/stop_profile" \
     -H "Authorization: ${API_KEY}"
