@@ -109,7 +109,7 @@ def tool_filter_request(req: dict):
     return True
 
 
-def read_requests(requests_path: str, args) -> List[Dict]:
+def read_requests_with_ts(requests_path: str, args) -> List[Dict]:
     data: Dict[str, str] = {}
     file_paths = sorted(glob(os.path.join(requests_path, "*.json")))
     logger.info(f"Reading {len(file_paths)} files from {requests_path}")
@@ -130,6 +130,15 @@ def read_requests(requests_path: str, args) -> List[Dict]:
         logger.info(f"Filter {num_filtered_requests} due to constrained decoding")
         requests = filtered_requests
     logger.info(f"Read {len(requests)} requests")
+    return requests
+
+
+def read_requests(requests_path: str, args) -> List[Dict]:
+    requests = []
+    for file_path in glob(os.path.join(requests_path, "*.json")):
+        with open(file_path, "r", encoding="utf-8") as f:
+            reqs = json.load(f)
+            requests.extend(reqs)
     return requests
 
 
@@ -516,7 +525,10 @@ async def get_request(requests, request_rate):
 
 async def run_benchmark(args):
     # read dataset
-    requests = read_requests(args.requests_path, args)
+    if args.with_ts:
+        requests = read_requests_with_ts(args.requests_path, args)
+    else:
+        requests = read_requests(args.requests_path, args)
     request_url = args.base_url.rstrip("/") + "/v1/chat/completions"
 
     if args.debug:
@@ -639,6 +651,8 @@ def parse_args():
     )
 
     parser.add_argument("--debug", action="store_true", help="Debug mode")
+
+    parser.add_argument("--with-ts", action="store_true")
 
     return parser.parse_args()
 
